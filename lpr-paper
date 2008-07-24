@@ -1,0 +1,350 @@
+#!/bin/bash
+# lpr wrapper script which does various clever things
+# specific to printing academic papers within a research
+# institution
+
+# clever thing #1:
+# - remember what papers everybody has printed, by keeping
+# a directory of per-user files in a shared location
+# - when asked to print a paper, check first whether
+# anybody else has printed it; prompt user as to whether
+# they'd rather get a copy from that person
+# - check matches both by binary (hash) and textual
+# (normalised word list) compare, to catch reformattings
+# of same paper
+
+#user date filename filesize pages #words first words...
+
+# clever thing #2:
+# - to save paper, do automatic crop+2up where appropriate
+# *** actually, just calculate bb and compare areas
+# if >=3 pages, use p2, else use p1
+
+# three cases:
+# LPR_PARSEOPTS is not set: use `which lpr-parseopts`
+# LPR_PARSEOPTS is given as a pathname: test -x it && use it
+#case "$LPR_PARSEOPTS" in
+#	'')  LPR_PARSEOPTS=`which lpr-parseopts` || (echo "No lpr-parseopts command found!" 1>&2; false) || exit 1 ;;
+#	*/*) test -x "${LPR_PARSEOPTS}" || (echo "$LPR_PARSEOPTS is not executable!" 1>&2; false) || exit 1 ;;
+#	*)   LPR_PARSEOPTS=`which "$LPR_PARSEOPTS"` || (echo "No lpr-parseopts command found!" 1>&2; false) || exit 1 ;;
+#esac
+
+
+store_path=${STORE_PATH:-/usr/groups/netos/library/lpr-paper}
+test -z "$USER" && USER=`whoami`
+
+require_command () {
+	varname=$( echo "$1" | tr '[:lower:]' '[:upper:]' | tr '-' '_' )
+	case "${!varname}" in
+		'')  declare ${varname}=`which $1` || (echo "No $1 command found!" 1>&2; false) || exit 1 ;;
+		*/*) test -x "${!varname}" || (echo "${!varname} is not executable!" 1>&2; false) || exit 1 ;;
+		*)   declare ${varname}=`which ${!varname}` || (echo "No ${!varname} command found!" 1>&2; false) || exit 1 ;;
+	esac
+	echo "${!varname}"
+}
+
+LPR_PARSEOPTS=$( require_command lpr-parseopts )
+LPR_WRAPPER=$( require_command lpr-wrapper )
+XMESSAGE=$( require_command xmessage )
+GS=$( require_command gs )
+CONVERT=$( require_command convert )
+PDFNUP=$( require_command pdfnup )
+PDFCROP=$( require_command pdfcrop )
+PDFTOTEXT=$( require_command pdftotext )
+if [[ -x `which gsfake-convertbb` ]] && \
+	[[ $( $PDFCROP --help 2>&1 | head -c7 ) = 'PDFCROP' ]]; then
+	PDFCROP="$PDFCROP --gscmd=gsfake-convertbb"
+else
+	echo "Warning: using broken Ghostscript bounding box detection in pdfcrop." 1>&2
+	echo "You should install gsfake-convertbb to fix this." 1>&2
+fi
+
+#echo commands: $LPR_PARSEOPTS $LPR_WRAPPER
+#exit 0
+
+# parse our LPR options and set the appropriate environment variables
+optvars=$( "$LPR_PARSEOPTS" "$@" | sed 's/^/export /' )
+eval $optvars
+
+# For each file to print
+fnames=$( printenv | grep 'LPR_OPT_filename' | sed 's/LPR_OPT_filename[^=]*=//' )
+
+if test -z "$fnames"; then
+	tmpfile=$(mktemp)
+	cat > "$tmpfile"
+	fnames="$tmpfile"
+fi
+
+prompt_user () {
+    message_text="$1"
+    shift
+    options="$@"
+    if test -n "$DISPLAY" && test -x `which xmessage`; then
+        buttons_string=$( echo "$options" | sed 's/ /,/g' )
+        $XMESSAGE -buttons "${buttons_string}" "${message_text}"; response="$?"
+        ord=$(( $response - 100 ))
+        answer=${!ord}
+        #echo "answer is $answer" 1>&2
+		echo "$answer"
+    else
+		tty=$(tty) || exit 1
+		echo -n "$message_text" > "$tty"
+		prompt_string=$( echo ${options} | sed -r 's#"? +"?#/#g' )
+		echo -n " [$prompt_string] " > "$tty"
+		read response < "$tty"
+		while true; do
+			option="$1"
+			echo "Testing response $response against option $option" 1>&2
+			if [[ -z "$option" ]]; then
+				break
+			fi
+			if [[ "$response" == "$option" ]]; then
+				echo "$response"
+				break
+			fi
+			shift
+		done
+    fi
+}
+
+for fname in $fnames; do
+
+fbasename=$( basename "$fname" )
+
+real_fname=$( readlink --canonicalize "$fname" )
+
+# ask file for the mime type of the file
+file_response=$( file -bi "$real_fname" )
+
+# Find out whether anyone else has printed this paper before
+case "$file_response" in
+	ERROR*) echo "Could not get filetype of ${fname}! Skipping." 1>&2; continue ;;
+	application/pdf) 
+		filetype=pdf
+		pdf_fname="$fname"
+		first_words=$( $PDFTOTEXT "$fname" /dev/stdout | tr -s '[:space:]' ' ' | cut -d' ' -f1-10 )
+		;;
+	application/postscript)
+		echo "Detected PostScript file." 1>&2
+		PS2PDF=$( require_command ps2pdf )
+		filetype=ps
+		pdf_fname=$(mktemp)
+		if $PS2PDF "$fname" "$pdf_fname"; then
+			first_words=$( $PDFTOTEXT "$pdf_fname" /dev/stdout | tr -s '[:space:]' ' ' | cut -d' ' -f1-10 )
+		else
+			echo "ps2pdf returned failure!" 1>&2
+			first_words=""
+		fi
+	;;
+	*)	filetype=unknown
+		first_words=''
+		;;
+esac
+
+# calculate size
+fsize=$( du -b "$real_fname" | sed 's/\([0-9]*\).*/\1/' | tr -d '[:space:]' )
+
+# We flag a match if name, type and size all match
+# *or* if first_words matches
+TAB=$'\t'
+human_readable_matches=""
+match_expr="[^${TAB}]*${TAB}[^${TAB}]*${TAB}${fbasename}${TAB}${filetype}${TAB}${fsize}${TAB}.*"
+matches=$( grep -h "$match_expr" "${store_path}"/* )
+echo "Expression '${match_expr}' gave matches: $matches" 1>&2
+if test -n "$matches"; then
+	human_readable_matches="${human_readable_matches}"$'\n'$( echo "$matches" | \
+		sed -r 's/([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\t]*)/User \1 printed the same file on \2/' )
+else
+	if test -n "$first_words"; then
+		echo -n "First words hexdump: " 1>&2; hexdump -C <<<"$first_words" 1>&2
+		match_expr="^[^${TAB}]*${TAB}[^${TAB}]*${TAB}[^${TAB}]*${TAB}[^${TAB}]*${TAB}[^${TAB}]*\t${first_words}"'$'
+		matches=$( grep -h "$match_expr" "${store_path}"/* )
+		echo "Expression '${match_expr}' gave matches: $matches" 1>&2
+		if test -n "$matches"; then
+			human_readable_matches="${human_readable_matches}"$'\n'$( echo "$matches" | \
+				sed -r 's/([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\t]*)/User \1 printed probably the same text on \2/' )
+		fi
+	fi
+fi
+
+if test -n "$human_readable_matches"; then
+user_response=$( prompt_user $'For your information:\n'"${human_readable_matches}"$'\n\nWould you still like to print?' Yes No )
+case "$user_response" in
+	Yes) 	;;
+	No)		continue ;;
+	*)		echo "Didn't understand output from prompt_user." 1>&2 ; continue ;;
+esac
+fi
+
+# If we got here, then the user definitely wants to print
+
+#if test -n "$first_words"; then
+	echo -e "${USER}\t`date -R`\t${fbasename}\t${filetype}\t${fsize}\t${first_words}" >> "${store_path}/${USER}"
+#else
+#	echo "Error: couldn't get first words of the paper!" 1>&2
+#fi
+# TODO: else do something else
+
+# allow environment to override printing -- we might just want
+# to record a paper as "printed" without printing it.
+if test -n "$LPR_PAPER_NO_PRINT"; then
+	continue
+fi
+
+# Work out whether to crop+2up this paper
+# Pick a page of the paper to test for margin sizes
+
+convert_geometry () {
+	FNAME="$1"
+	$CONVERT "$FNAME" -trim -fuzz "10%" -identify /dev/null | while read line; do
+		SED_EXPR="^${FNAME} PDF [0-9]*x[0-9]*=>\([0-9]*x[0-9]*\) \([0-9]*x[0-9]*[-+][0-9]*[-+][0-9]*\) .*"
+		GEOMETRY=$( echo "$line" | sed "s~$SED_EXPR~\1~" )
+		PAGE_GEOMETRY=$( echo "$line" | sed "s~$SED_EXPR~\2~" )
+
+		if [ -z "$GEOMETRY" ] || [ -z "$PAGE_GEOMETRY" ]; then
+			echo "Couldn't get bounding box for file $FNAME" 1>&2
+			echo "GEOMETRY is $GEOMETRY, PAGE_GEOMETRY is $PAGE_GEOMETRY" 1>&2
+		else
+			if [ "$PAGE_GEOMETRY" = "1x1-1-1" ]; then
+				XMIN=0; YMIN=0; XMAX=0; YMAX=0
+				XMIN_UNCROPPED=0; YMIN_UNCROPPED=0; XMAX_UNCROPPED=0; YMAX_UNCROPPED=0
+			else
+				UNCROPPED_SIZE_X=$( echo $PAGE_GEOMETRY | sed 's/\([0-9]*\)x\([0-9]*\)[-+]\([0-9]*\)[-+]\([0-9]*\).*/\1/')
+				UNCROPPED_SIZE_Y=$( echo $PAGE_GEOMETRY | sed 's/\([0-9]*\)x\([0-9]*\)[-+]\([0-9]*\)[-+]\([0-9]*\).*/\2/')
+				XMIN=$( echo $PAGE_GEOMETRY             | sed 's/\([0-9]*\)x\([0-9]*\)[-+]\([0-9]*\)[-+]\([0-9]*\).*/\3/')
+				YMIN_FROM_BOTTOM=$( echo $PAGE_GEOMETRY | sed 's/\([0-9]*\)x\([0-9]*\)[-+]\([0-9]*\)[-+]\([0-9]*\).*/\4/')
+				CROPPED_SIZE_X=$( echo $GEOMETRY | sed 's/\([0-9]*\)x\([0-9]*\).*/\1/')
+				CROPPED_SIZE_Y=$( echo $GEOMETRY | sed 's/\([0-9]*\)x\([0-9]*\).*/\2/')
+				YMAX=$(( $UNCROPPED_SIZE_Y - $YMIN_FROM_BOTTOM ))
+				YMIN=$(( $YMAX - $CROPPED_SIZE_Y ))
+				XMAX=$(( $XMIN + $CROPPED_SIZE_X ))
+			fi
+			echo "%%BoundingBox: $XMIN $YMIN $XMAX $YMAX" 1>&2
+			echo "%%HiResBoundingBox: $XMIN.000000 $YMIN.000000 $XMAX.000000 $YMAX.000000" 1>&2
+			echo -e "Uncropped: ${UNCROPPED_SIZE_X} ${UNCROPPED_SIZE_Y}\tCropped: $CROPPED_SIZE_X $CROPPED_SIZE_Y"
+		fi	
+	done
+}
+
+smallest_margins_ratio () {
+	smallest_ratio=1000
+	page_num=0
+	while true; do
+		while [[ "$1" -gt "$page_num" ]]; do
+			# we're not yet on the correct page number, so read a line
+			read text1 uncx uncy text2 cx cy
+			echo "text1 uncx uncy text2 cx cy: $text1 $uncx $uncy $text2 $cx $cy" 1>&2
+			page_num=$(( $page_num + 1 ))
+		done
+		# now our variables contain the data corresponding to page $page_num
+		# calculate the ratio of the cropped area to the uncropped area
+		this_ratio=$(( ( $cx * $cy * 1000 ) / ( $uncx * $uncy ) ))
+		echo "Calculated a ratio of $this_ratio" 1>&2
+		if [[ $this_ratio -lt $smallest_ratio ]]; then
+			smallest_ratio=$this_ratio
+		fi
+		shift || break
+	done
+	echo "$smallest_ratio"
+}
+
+# We pick the smallest margins-ratio out of up to three:
+# page 1      if 1 <= #pages < 3
+# page 2      if 3 <= #pages < 6
+# pages 2,4   if 6 <= #pages < 8
+# pages 2,4,7 if 9 <= #pages
+# (This is to avoid accidentally picking only pages with unrepresentative
+# margin sizes, say cover sheets, full-page figures or near-empty last pages.)
+
+# To avoid unnecessary delay, we want to quit gs (break the pipeline) when
+# either we see 'Processing pages...' on stdout, or when the linecount on
+# stderr reaches 18 (i.e. nine pages; there are two lines of output per page)
+GS_OUTPUT=$( \
+	( ( gs -sDEVICE=bbox -sOutputFile=/dev/stdout -dNOPAUSE -dBATCH "$fname" | \
+	sed '/^Processing pages/q' 1>&3 ) 2>&1 | head -n18 ) 3>&1 )
+if grep "^Processing pages" <<<"$GS_OUTPUT"; then
+	NUM_PAGES=$( echo "$GS_OUTPUT" | grep "^Processing pages" | sed 's/.*Processing pages [0-9]* through \([0-9]*\).*/\1/' )
+else
+	NUM_PAGES=$( echo "$GS_OUTPUT" | grep '^%%BoundingBox' | wc -l )
+fi
+echo "Detected that the document has $NUM_PAGES pages!" 1>&2
+# note that we could potentially use the gs output for bounding box data,
+# but we don't trust gs's bounding box info! we use convert instead
+
+case "$NUM_PAGES" in
+	''|0) echo "Error: file $fname has an invalid number of pages ($NUM_PAGES)!" 1>&2
+		continue
+	;;
+	1|2)	margins_ratio=$( convert_geometry "$fname" | smallest_margins_ratio 1 )
+			echo "Margins ratio is $margins_ratio" 1>&2
+	;;
+	3|4|5)	margins_ratio=$( convert_geometry "$fname" | smallest_margins_ratio 2 )
+			echo "Margins ratio is $margins_ratio" 1>&2
+	;;
+	6|7|8)	margins_ratio=$( convert_geometry "$fname" | smallest_margins_ratio 2 4 )
+			echo "Margins ratio is $margins_ratio" 1>&2
+	;;
+	*)		margins_ratio=$( convert_geometry "$fname" | smallest_margins_ratio 2 4 7 )
+			echo "Margins ratio is $margins_ratio" 1>&2
+	;;
+esac
+
+crop_threshold=500 # if cropping takes it down to half the area or less, 2up is a good idea
+
+if [[ -d "$tmpdir" ]] && [[ ! -z "$made_tmp" ]]; then
+	rm -rf "$tmpdir"
+fi
+tmpdir=""
+tmpfile1=""
+tmpfile2=""
+
+make_fname_cropped () {
+	tmpdir=$(mktemp -d )
+	realfile=$( readlink -f "$pdf_fname" )
+	pushd "$tmpdir" 1>/dev/null
+	made_tmp=1
+	tmpfile1=cropped.pdf
+	tmpfile2="$tmpdir"/cropped-2up.pdf
+	(cd "$tmpdir"; $PDFCROP --margins 15 "$realfile" "$tmpfile1" )
+	$PDFNUP --nup 2x1 --outfile "$tmpfile2" "$tmpdir"/"$tmpfile1"
+	fname="$tmpfile2"
+	(cd "$tmpdir"; unlink "$tmpfile1" )
+	popd 1>/dev/null
+}
+
+if [[ $margins_ratio -le $crop_threshold ]]; then
+	# TODO: add a 'Preview' option below
+	case $( prompt_user $'It looks like margins account for at least half of the page area.\n
+Would you like to crop+2up before printing?' Yes No Preview ) in
+		Yes)
+			make_fname_cropped
+		;;
+		No)
+		;;
+		Preview)
+			oldfname="$fname"
+			make_fname_cropped
+			MIMEOPEN=$( require_command mimeopen )
+			mimeopen "$fname" &
+			case $( prompt_user $'Print cropped version?' Yes No ) in
+				Yes)
+				;;
+				No) fname="$oldfname";
+				;;
+				*) echo "Didn't understand the response from prompt_user." 1>&2; continue
+				;;
+			esac
+		;;
+		*) echo "Didn't understand the response from prompt_user." 1>&2; continue
+		;;
+	esac
+fi
+
+# Run the lpr-wrapper- - it should ignore LPR_OPT_filename.*!
+${LPR_WRAPPER} "$fname"
+
+if [[ ! -z "$tmpfile2" ]]; then	unlink "$tmpfile2"; fi
+# TODO: also delete temporary PDF file if it was created
+
+# continue to the next filename
+done
