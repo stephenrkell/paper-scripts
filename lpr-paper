@@ -9,26 +9,12 @@
 # - when asked to print a paper, check first whether
 # anybody else has printed it; prompt user as to whether
 # they'd rather get a copy from that person
-# - check matches both by binary (hash) and textual
+# - check matches both by exact (name/size) and fuzzy
 # (normalised word list) compare, to catch reformattings
 # of same paper
 
-#user date filename filesize pages #words first words...
-
 # clever thing #2:
 # - to save paper, do automatic crop+2up where appropriate
-# *** actually, just calculate bb and compare areas
-# if >=3 pages, use p2, else use p1
-
-# three cases:
-# LPR_PARSEOPTS is not set: use `which lpr-parseopts`
-# LPR_PARSEOPTS is given as a pathname: test -x it && use it
-#case "$LPR_PARSEOPTS" in
-#	'')  LPR_PARSEOPTS=`which lpr-parseopts` || (echo "No lpr-parseopts command found!" 1>&2; false) || exit 1 ;;
-#	*/*) test -x "${LPR_PARSEOPTS}" || (echo "$LPR_PARSEOPTS is not executable!" 1>&2; false) || exit 1 ;;
-#	*)   LPR_PARSEOPTS=`which "$LPR_PARSEOPTS"` || (echo "No lpr-parseopts command found!" 1>&2; false) || exit 1 ;;
-#esac
-
 
 store_path=${STORE_PATH:-/usr/groups/netos/library/lpr-paper}
 test -z "$USER" && USER=`whoami`
@@ -117,6 +103,8 @@ real_fname=$( readlink --canonicalize "$fname" )
 file_response=$( file -bi "$real_fname" )
 
 # Find out whether anyone else has printed this paper before
+
+# first work out file type to get first-words list
 case "$file_response" in
 	ERROR*) echo "Could not get filetype of ${fname}! Skipping." 1>&2; continue ;;
 	application/pdf) 
@@ -193,7 +181,7 @@ fi
 
 # Work out whether to crop+2up this paper
 # Pick a page of the paper to test for margin sizes
-
+# TODO: merge this code with the copy in gsfake-convertbb
 convert_geometry () {
 	FNAME="$1"
 	$CONVERT "$FNAME" -trim -fuzz "10%" -identify /dev/null | while read line; do
@@ -253,7 +241,7 @@ smallest_margins_ratio () {
 # page 2      if 3 <= #pages < 6
 # pages 2,4   if 6 <= #pages < 8
 # pages 2,4,7 if 9 <= #pages
-# (This is to avoid accidentally picking only pages with unrepresentative
+# (This is to minimise probability of picking only pages with unrepresentative
 # margin sizes, say cover sheets, full-page figures or near-empty last pages.)
 
 # To avoid unnecessary delay, we want to quit gs (break the pipeline) when
@@ -270,6 +258,10 @@ fi
 echo "Detected that the document has $NUM_PAGES pages!" 1>&2
 # note that we could potentially use the gs output for bounding box data,
 # but we don't trust gs's bounding box info! we use convert instead
+
+# TODO: somehow rework this to avoid recalculating all the bounding boxes
+# if/when we do decide to crop the paper. Maybe we can use gsfake-convertbb
+# rather than gs, and background the job rather than killing it?
 
 case "$NUM_PAGES" in
 	''|0) echo "Error: file $fname has an invalid number of pages ($NUM_PAGES)!" 1>&2
@@ -313,7 +305,6 @@ make_fname_cropped () {
 }
 
 if [[ $margins_ratio -le $crop_threshold ]]; then
-	# TODO: add a 'Preview' option below
 	case $( prompt_user $'It looks like margins account for at least half of the page area.\n
 Would you like to crop+2up before printing?' Yes No Preview ) in
 		Yes)
