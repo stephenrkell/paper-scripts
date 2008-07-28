@@ -37,7 +37,11 @@ escape_regexp () {
 
 make_match_any_line_regexp () {
     # makes a giant regexp which matches any of a set of lines, read from stdin
-    cat | escape_regexp | tr '\n' '|' | sed 's/|$//'
+	# If we don't read any lines from stdin, we return a regexp that matches only
+	# blank lines. Ideally we would return a regexp which doesn't match anything,
+	# but it turns out that there is no such grep regexp (I think!) and the
+	# alternative suffices for our purposes (below)
+    cat | escape_regexp | tr '\n' '|' | sed 's/|$/\n/' | sed 's/^$/\^\$/'
 }
 
 eval `require_command lpr-parseopts`
@@ -155,8 +159,8 @@ if test -n "$matches"; then
 	human_readable_matches="${human_readable_matches}"$'\n'$( echo "$matches" | \
 		sed -r 's/([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\t]*)/User \1 printed the same file on \2/' )
 fi
-# now make a big regexp out of the lines we just matched, so that we can
-# exclude them from the next match (to avoid duplicated results)
+# Now make a big regexp out of the lines we just matched, so that we can
+# exclude them from the next match (to avoid duplicated results). 
 omit_regexp=$( echo "$matches" | make_match_any_line_regexp )
 if test -n "$first_words"; then
 	#echo -n "First words hexdump: " 1>&2; hexdump -C <<<"$first_words" 1>&2
