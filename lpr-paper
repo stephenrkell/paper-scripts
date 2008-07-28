@@ -20,23 +20,34 @@ store_path=${STORE_PATH:-/usr/groups/netos/library/lpr-paper}
 test -z "$USER" && USER=`whoami`
 
 require_command () {
-	varname=$( echo "$1" | tr '[:lower:]' '[:upper:]' | tr '-' '_' )
-	case "${!varname}" in
-		'')  declare ${varname}=`which $1` || (echo "No $1 command found!" 1>&2; false) || exit 1 ;;
-		*/*) test -x "${!varname}" || (echo "${!varname} is not executable!" 1>&2; false) || exit 1 ;;
-		*)   declare ${varname}=`which ${!varname}` || (echo "No ${!varname} command found!" 1>&2; false) || exit 1 ;;
-	esac
-	echo "${!varname}"
+    varname=$( echo "$1" | tr '[:lower:]' '[:upper:]' | tr '-' '_' )
+    case "${!varname}" in
+        '')  CMDPATH=`which $1 2>/dev/null`; test -n "$CMDPATH" && declare ${varname}="$CMDPATH" || (echo "No $1 command found" 1>&2; false) ;;
+        */*) test -x ${!varname} || (echo ${!varname}" is not executable" 1>&2; false) ;;
+        *)   CMDPATH=`which ${!varname} 2>/dev/null`; test -n "$CMDPATH" && declare ${varname}="$CMDPATH" || (echo "No "${!varname}" command found" 1>&2; false) ;;
+    esac && echo declare ${varname}=${!varname} \
+        || echo "exit 1"
 }
 
-LPR_PARSEOPTS=$( require_command lpr-parseopts )
-LPR_WRAPPER=$( require_command lpr-wrapper )
-XMESSAGE=$( require_command xmessage )
-GS=$( require_command gs )
-CONVERT=$( require_command convert )
-PDFNUP=$( require_command pdfnup )
-PDFCROP=$( require_command pdfcrop )
-PDFTOTEXT=$( require_command pdftotext )
+escape_regexp () {
+    # filter which reads a string on input, and yields a plain grep-style regexp
+    # which matches the string literally, by escaping the metacharacters
+    cat | sed -r 's/(\*|\.|\[|\^|\$|\[|\])/\\\1/g'
+}
+
+make_match_any_line_regexp () {
+    # makes a giant regexp which matches any of a set of lines, read from stdin
+    cat | escape_regexp | tr '\n' '|' | sed 's/|$//'
+}
+
+eval `require_command lpr-parseopts`
+eval `require_command lpr-wrapper`
+#eval `require_command xmessage`
+eval `require_command gs`
+eval `require_command convert`
+eval `require_command pdfnup`
+eval `require_command pdfcrop`
+eval `require_command pdftotext`
 if [[ -x `which gsfake-convertbb` ]] && \
 	[[ $( $PDFCROP --help 2>&1 | head -c7 ) = 'PDFCROP' ]]; then
 	PDFCROP="$PDFCROP --gscmd=gsfake-convertbb"
@@ -67,7 +78,7 @@ prompt_user () {
     options="$@"
     if test -n "$DISPLAY" && test -x `which xmessage`; then
         buttons_string=$( echo "$options" | sed 's/ /,/g' )
-        $XMESSAGE -buttons "${buttons_string}" "${message_text}"; response="$?"
+        xmessage -buttons "${buttons_string}" "${message_text}"; response="$?"
         ord=$(( $response - 100 ))
         answer=${!ord}
         #echo "answer is $answer" 1>&2
@@ -93,6 +104,7 @@ prompt_user () {
     fi
 }
 
+# start of main loop, iterating over filenames passed as arguments
 for fname in $fnames; do
 
 fbasename=$( basename "$fname" )
@@ -114,7 +126,7 @@ case "$file_response" in
 		;;
 	application/postscript)
 		echo "Detected PostScript file." 1>&2
-		PS2PDF=$( require_command ps2pdf )
+		eval `require_command ps2pdf`
 		filetype=ps
 		pdf_fname=$(mktemp)
 		if $PS2PDF "$fname" "$pdf_fname"; then
@@ -142,16 +154,19 @@ echo "Expression '${match_expr}' gave matches: $matches" 1>&2
 if test -n "$matches"; then
 	human_readable_matches="${human_readable_matches}"$'\n'$( echo "$matches" | \
 		sed -r 's/([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\t]*)/User \1 printed the same file on \2/' )
-else
-	if test -n "$first_words"; then
-		echo -n "First words hexdump: " 1>&2; hexdump -C <<<"$first_words" 1>&2
-		match_expr="^[^${TAB}]*${TAB}[^${TAB}]*${TAB}[^${TAB}]*${TAB}[^${TAB}]*${TAB}[^${TAB}]*\t${first_words}"'$'
-		matches=$( grep -h "$match_expr" "${store_path}"/* )
-		echo "Expression '${match_expr}' gave matches: $matches" 1>&2
-		if test -n "$matches"; then
-			human_readable_matches="${human_readable_matches}"$'\n'$( echo "$matches" | \
-				sed -r 's/([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\t]*)/User \1 printed probably the same text on \2/' )
-		fi
+fi
+# now make a big regexp out of the lines we just matched, so that we can
+# exclude them from the next match (to avoid duplicated results)
+omit_regexp=$( echo "$matches" | make_match_any_line_regexp )
+if test -n "$first_words"; then
+	#echo -n "First words hexdump: " 1>&2; hexdump -C <<<"$first_words" 1>&2
+    escaped_first_words=$( echo "$first_words" | escape_regexp )
+	match_expr="^[^${TAB}]*${TAB}[^${TAB}]*${TAB}[^${TAB}]*${TAB}[^${TAB}]*${TAB}[^${TAB}]*${TAB}${escaped_first_words}"'$'
+	matches=$( cat "${store_path}"/* | grep -v "$omit_regexp" | grep -h "$match_expr" )
+	echo "Expression '${match_expr}' gave matches: $matches" 1>&2
+	if test -n "$matches"; then
+		human_readable_matches="${human_readable_matches}"$'\n'$( echo "$matches" | \
+			sed -r 's/([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\t]*)/User \1 printed probably the same text on \2/' )
 	fi
 fi
 
@@ -264,19 +279,19 @@ echo "Detected that the document has $NUM_PAGES pages!" 1>&2
 # rather than gs, and background the job rather than killing it?
 
 case "$NUM_PAGES" in
-	''|0) echo "Error: file $fname has an invalid number of pages ($NUM_PAGES)!" 1>&2
+	(''|0) echo "Error: file $fname has an invalid number of pages ($NUM_PAGES)!" 1>&2
 		continue
 	;;
-	1|2)	margins_ratio=$( convert_geometry "$fname" | smallest_margins_ratio 1 )
+	(1|2)	margins_ratio=$( convert_geometry "$fname" | smallest_margins_ratio 1 )
 			echo "Margins ratio is $margins_ratio" 1>&2
 	;;
-	3|4|5)	margins_ratio=$( convert_geometry "$fname" | smallest_margins_ratio 2 )
+	(3|4|5)	margins_ratio=$( convert_geometry "$fname" | smallest_margins_ratio 2 )
 			echo "Margins ratio is $margins_ratio" 1>&2
 	;;
-	6|7|8)	margins_ratio=$( convert_geometry "$fname" | smallest_margins_ratio 2 4 )
+	(6|7|8)	margins_ratio=$( convert_geometry "$fname" | smallest_margins_ratio 2 4 )
 			echo "Margins ratio is $margins_ratio" 1>&2
 	;;
-	*)		margins_ratio=$( convert_geometry "$fname" | smallest_margins_ratio 2 4 7 )
+	(*)		margins_ratio=$( convert_geometry "$fname" | smallest_margins_ratio 2 4 7 )
 			echo "Margins ratio is $margins_ratio" 1>&2
 	;;
 esac
@@ -307,26 +322,26 @@ make_fname_cropped () {
 if [[ $margins_ratio -le $crop_threshold ]]; then
 	case $( prompt_user $'It looks like margins account for at least half of the page area.\n
 Would you like to crop+2up before printing?' Yes No Preview ) in
-		Yes)
+		(Yes)
 			make_fname_cropped
 		;;
-		No)
+		(No)
 		;;
-		Preview)
+		(Preview)
 			oldfname="$fname"
 			make_fname_cropped
-			MIMEOPEN=$( require_command mimeopen )
-			mimeopen "$fname" &
+			eval `require_command mimeopen`
+			$MIMEOPEN "$fname" &
 			case $( prompt_user $'Print cropped version?' Yes No ) in
-				Yes)
+				(Yes)
 				;;
-				No) fname="$oldfname";
+				(No) fname="$oldfname";
 				;;
-				*) echo "Didn't understand the response from prompt_user." 1>&2; continue
+				(*) echo "Didn't understand the response from prompt_user." 1>&2; continue
 				;;
 			esac
 		;;
-		*) echo "Didn't understand the response from prompt_user." 1>&2; continue
+		(*) echo "Didn't understand the response from prompt_user." 1>&2; continue
 		;;
 	esac
 fi
