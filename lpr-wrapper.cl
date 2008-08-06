@@ -11,7 +11,7 @@ while read opt; do
 	case "$opt_key" in
 		LPR_OPT_p) argstring="${argstring}${space}-p ${opt_val}" ;;
 		LPR_OPT_staple) argstring="${argstring}${space}-staple" ;;
-		LPR_OPT_printer) argstring="${argstring}${space}-P ${opt_val}" ;;
+		LPR_OPT_printer|LPR_OPT_Printer) argstring="${argstring}${space}-P ${opt_val}" ;;
 		LPR_OPT_filename*) #filenames="$filenames"$'\n'"$opt_val" ;;
 			;;
 		LPR_OPT_fullcmd) ;; # ignore this
