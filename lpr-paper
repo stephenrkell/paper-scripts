@@ -186,7 +186,10 @@ fi
 # If we got here, then the user definitely wants to print
 
 #if test -n "$first_words"; then
+	saved_umask=`umask`
+	umask 022
 	echo -e "${USER}\t`date -R`\t${fbasename}\t${filetype}\t${fsize}\t${first_words}" >> "${store_path}/${USER}"
+	umask $saved_umask
 #else
 #	echo "Error: couldn't get first words of the paper!" 1>&2
 #fi
