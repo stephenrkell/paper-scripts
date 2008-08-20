@@ -190,6 +190,11 @@ fi
 	umask 022
 	echo -e "${USER}\t`date -R`\t${fbasename}\t${filetype}\t${fsize}\t${first_words}" >> "${store_path}/${USER}"
 	umask $saved_umask
+	# test whether the user's paper file is not world-readable -- if not, e-mail them! (just for fun)
+	if [[ $( expr $( stat -c '%A' "${store_path}/${USER}" ) : '.......r..' ) -eq 0 ]]; then
+		echo -e "Dear $0 user,\n\nYour record of printed papers, stored at ${store_path}/${USER}, is"\
+			"not world-readable. Please correct this at your earliest convenience.\n\nThank you.\n\n$0" | fmt | mail -s "A message from $0" "$USER"
+	fi
 #else
 #	echo "Error: couldn't get first words of the paper!" 1>&2
 #fi
