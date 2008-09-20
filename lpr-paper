@@ -41,7 +41,8 @@ make_match_any_line_regexp () {
 	# blank lines. Ideally we would return a regexp which doesn't match anything,
 	# but it turns out that there is no such grep regexp (I think!) and the
 	# alternative suffices for our purposes (below)
-    cat | escape_regexp | tr '\n' '|' | sed 's/|$/\n/' | sed 's/^$/\^\$/'
+    cat | escape_regexp | sed 's/\(.*\)/^\\(\1\\)$/' | tr '\n' '\f' | \
+    	sed 's/\f$/\n/' | sed 's/\f/\\|/g' |  sed 's/^$/\^\$/'
 }
 
 eval `require_command lpr-parseopts`
@@ -166,7 +167,10 @@ if test -n "$first_words"; then
 	#echo -n "First words hexdump: " 1>&2; hexdump -C <<<"$first_words" 1>&2
     escaped_first_words=$( echo "$first_words" | escape_regexp )
 	match_expr="^[^${TAB}]*${TAB}[^${TAB}]*${TAB}[^${TAB}]*${TAB}[^${TAB}]*${TAB}[^${TAB}]*${TAB}${escaped_first_words}"'$'
-	matches=$( cat "${store_path}"/* | grep -v "$omit_regexp" | grep -h "$match_expr" )
+	echo "Omit_regexp is $omit_regexp" | sed 's/\t/\\t/g' 1>&2
+    echo "Lines matching omit_regexp: " 1>&2
+    cat "${store_path}"/* | grep "$omit_regexp" 1>&2
+    matches=$( cat "${store_path}"/* | grep -v "$omit_regexp" | grep -h "$match_expr" )
 	echo "Expression '${match_expr}' gave matches: $matches" 1>&2
 	if test -n "$matches"; then
 		human_readable_matches="${human_readable_matches}"$'\n'$( echo "$matches" | \
@@ -232,8 +236,8 @@ convert_geometry () {
 	done
 }
 
-smallest_margins_ratio () {
-	smallest_ratio=1000
+greatest_margins_ratio () {
+	greatest_ratio=0
 	page_num=0
 	while true; do
 		while [[ "$1" -gt "$page_num" ]]; do
@@ -246,12 +250,12 @@ smallest_margins_ratio () {
 		# calculate the ratio of the cropped area to the uncropped area
 		this_ratio=$(( ( $cx * $cy * 1000 ) / ( $uncx * $uncy ) ))
 		echo "Calculated a ratio of $this_ratio" 1>&2
-		if [[ $this_ratio -lt $smallest_ratio ]]; then
-			smallest_ratio=$this_ratio
+		if [[ $this_ratio -gt $greatest_ratio ]]; then
+			greatest_ratio=$this_ratio
 		fi
 		shift || break
 	done
-	echo "$smallest_ratio"
+	echo "$greatest_ratio"
 }
 
 # We pick the smallest margins-ratio out of up to three:
@@ -285,16 +289,16 @@ case "$NUM_PAGES" in
 	(''|0) echo "Error: file $fname has an invalid number of pages ($NUM_PAGES)!" 1>&2
 		continue
 	;;
-	(1|2)	margins_ratio=$( convert_geometry "$fname" | smallest_margins_ratio 1 )
+	(1|2)	margins_ratio=$( convert_geometry "$fname" | greatest_margins_ratio 1 )
 			echo "Margins ratio is $margins_ratio" 1>&2
 	;;
-	(3|4|5)	margins_ratio=$( convert_geometry "$fname" | smallest_margins_ratio 2 )
+	(3|4|5)	margins_ratio=$( convert_geometry "$fname" | greatest_margins_ratio 2 )
 			echo "Margins ratio is $margins_ratio" 1>&2
 	;;
-	(6|7|8)	margins_ratio=$( convert_geometry "$fname" | smallest_margins_ratio 2 4 )
+	(6|7|8)	margins_ratio=$( convert_geometry "$fname" | greatest_margins_ratio 2 4 )
 			echo "Margins ratio is $margins_ratio" 1>&2
 	;;
-	(*)		margins_ratio=$( convert_geometry "$fname" | smallest_margins_ratio 2 4 7 )
+	(*)		margins_ratio=$( convert_geometry "$fname" | greatest_margins_ratio 2 4 7 )
 			echo "Margins ratio is $margins_ratio" 1>&2
 	;;
 esac
@@ -334,8 +338,8 @@ Would you like to crop+2up before printing?' Yes No Preview ) in
 			oldfname="$fname"
 			make_fname_cropped
 			eval `require_command mimeopen`
-			$MIMEOPEN "$fname" &
-			case $( prompt_user $'Print cropped version?' Yes No ) in
+			$MIMEOPEN -n "$fname" &
+			case $( prompt_user $'The preview should appear in a moment.\n\nPrint cropped version?' Yes No ) in
 				(Yes)
 				;;
 				(No) fname="$oldfname";
