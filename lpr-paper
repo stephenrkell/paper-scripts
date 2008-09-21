@@ -207,7 +207,7 @@ fi
 convert_geometry () {
 	FNAME="$1"
 	$CONVERT "$FNAME" -trim -fuzz "10%" -identify /dev/null | while read line; do
-		SED_EXPR="^${FNAME} PDF [0-9]*x[0-9]*=>\([0-9]*x[0-9]*\) \([0-9]*x[0-9]*[-+][0-9]*[-+][0-9]*\) .*"
+		SED_EXPR="^${FNAME}.* PDF [0-9]*x[0-9]*=>\([0-9]*x[0-9]*\) \([0-9]*x[0-9]*[-+][0-9]*[-+][0-9]*\) .*"
 		GEOMETRY=$( echo "$line" | sed "s~$SED_EXPR~\1~" )
 		PAGE_GEOMETRY=$( echo "$line" | sed "s~$SED_EXPR~\2~" )
 
@@ -236,6 +236,8 @@ convert_geometry () {
 	done
 }
 
+# misnomer alert: the greatest_margins_ratio is actually the page utilisation ratio
+# for the page which has the *smallest* margins!
 greatest_margins_ratio () {
 	greatest_ratio=0
 	page_num=0
@@ -256,6 +258,7 @@ greatest_margins_ratio () {
 		shift || break
 	done
 	echo "$greatest_ratio"
+    exit $page_num # use the exit status to return the page number that had greatest margins
 }
 
 # We pick the smallest margins-ratio out of up to three:
@@ -272,9 +275,9 @@ greatest_margins_ratio () {
 GS_OUTPUT=$( \
 	( ( gs -sDEVICE=bbox -sOutputFile=/dev/stdout -dNOPAUSE -dBATCH "$fname" | \
 	sed '/^Processing pages/q' 1>&3 ) 2>&1 | head -n18 ) 3>&1 )
-if grep "^Processing pages" <<<"$GS_OUTPUT"; then
+if grep "^Processing pages" <<<"$GS_OUTPUT"; then # if we get a "Processing pages..." header from gs
 	NUM_PAGES=$( echo "$GS_OUTPUT" | grep "^Processing pages" | sed 's/.*Processing pages [0-9]* through \([0-9]*\).*/\1/' )
-else
+else # we didn't get a Processing pages... header, count lines
 	NUM_PAGES=$( echo "$GS_OUTPUT" | grep '^%%BoundingBox' | wc -l )
 fi
 echo "Detected that the document has $NUM_PAGES pages!" 1>&2
@@ -285,23 +288,36 @@ echo "Detected that the document has $NUM_PAGES pages!" 1>&2
 # if/when we do decide to crop the paper. Maybe we can use gsfake-convertbb
 # rather than gs, and background the job rather than killing it?
 
+CONVERT_GEOMETRY_OUTPUT=$( convert_geometry "$fname" )
+template_page_number=1
 case "$NUM_PAGES" in
 	(''|0) echo "Error: file $fname has an invalid number of pages ($NUM_PAGES)!" 1>&2
 		continue
 	;;
-	(1|2)	margins_ratio=$( convert_geometry "$fname" | greatest_margins_ratio 1 )
+	(1|2)	margins_ratio=$( echo "$CONVERT_GEOMETRY_OUTPUT" | greatest_margins_ratio 1 )
+    		template_page_number=$?
 			echo "Margins ratio is $margins_ratio" 1>&2
 	;;
-	(3|4|5)	margins_ratio=$( convert_geometry "$fname" | greatest_margins_ratio 2 )
+	(3|4|5)	margins_ratio=$( echo "$CONVERT_GEOMETRY_OUTPUT" | greatest_margins_ratio 2 )
+			template_page_number=$?
 			echo "Margins ratio is $margins_ratio" 1>&2
 	;;
-	(6|7|8)	margins_ratio=$( convert_geometry "$fname" | greatest_margins_ratio 2 4 )
+	(6|7|8)	margins_ratio=$( echo "$CONVERT_GEOMETRY_OUTPUT" | greatest_margins_ratio 2 4 )
+		    template_page_number=$?
 			echo "Margins ratio is $margins_ratio" 1>&2
 	;;
-	(*)		margins_ratio=$( convert_geometry "$fname" | greatest_margins_ratio 2 4 7 )
+	(*)		margins_ratio=$( echo "$CONVERT_GEOMETRY_OUTPUT" | greatest_margins_ratio 2 4 7 )
+		    template_page_number=$?
 			echo "Margins ratio is $margins_ratio" 1>&2
 	;;
 esac
+
+echo "template_page_number is $template_page_number" 1>&2
+template_page_geometry=$( echo "$CONVERT_GEOMETRY_OUTPUT" | sed -n "$template_page_number p" )
+echo "template_page_geometry is $template_page_geometry" 1>&2
+template_width=$( echo $template_page_geometry | sed 's/.*Cropped: *\([0-9]\+\) *\([0-9]\+\).*/\1/' )
+template_height=$( echo $template_page_geometry | sed 's/.*Cropped: *\([0-9]\+\) *\([0-9]\+\).*/\2/' )
+echo "template width, height are $template_width, $template_height" 1>&2
 
 crop_threshold=500 # if cropping takes it down to half the area or less, 2up is a good idea
 
@@ -312,7 +328,78 @@ tmpdir=""
 tmpfile1=""
 tmpfile2=""
 
-make_fname_cropped () {
+fake_pdfnup () {
+##  Now specify the default settings for pdfnup:
+##
+frame=false            ## do not print a thin border around pages
+nup=2x1                ## two logical pages side by side
+paper=a4paper          ## alternatives are other LaTeX paper sizes
+orient=auto            ## alternatives are landscape and portrait
+pages=all
+turn=true              ## landscape pages are landscape-oriented
+noautoscale=false      ## scale logical pages to fit
+column=false           ## don't use column-major ordering
+columnstrict=false     ## (see the pdfpages manual)
+delta="0 0"            ## no space between logical pages
+offset="0 0"           ## output centred on physical page
+trim="0 0 0 0"         ## don't trim the logical pages
+scale=1.0              ## don't scale the resultant pages
+openright=false        ## don't insert blank page at front of document
+tidy=true              ## delete all temporary files immediately
+template_size="\{${1}pt\}\{${2}pt\}"
+
+case $pages in
+        all) pages=-;;
+        *) pages={$pages};;
+esac
+x=`echo $nup | sed 's/..$//'`
+y=`echo $nup | sed 's/^..//'`
+fitpaper=false  ## the normal setting
+case $orient in
+        auto) fitpaper=true  ## used only for 2x2, 3x3 etc.
+              if test "$x" -gt "$y"
+          then orient=landscape ; fitpaper=false
+          fi
+          if test "$y" -gt "$x"
+          then orient=portrait ; fitpaper=false
+          fi;;
+esac
+
+tmpdir=$( mktemp -d )
+tmp_texfile=$tmpdir/tmp.tex
+tmp_pdffile=$tmpdir/tmp.pdf
+
+(sed s*pdfname*"$inputfile_name"* <<EndTemplate
+\documentclass[papersize,orientation]{article}
+\usepackage{pdfpages}
+\begin{document}
+\includepdf[pages=,nup=,frame=,fitpaper=,trim=,delta=,offset=,scale=,turn=,noautoscale=,column=,columnstrict=,openright=,templatesize=]{pdfname}
+\end{document}
+EndTemplate
+) \
+    | sed 's/^[^b]egin/\\begin/' \
+    | sed s/pages=/pages="$pages"/ \
+    | sed s/nup=/nup="$nup"/ \
+    | sed s/frame=/frame="$frame"/ \
+    | sed s/fitpaper=/fitpaper="$fitpaper"/ \
+    | sed s/trim=/trim="$trim"/ \
+    | sed s/delta=/delta="$delta"/ \
+    | sed s/offset=/offset="$offset"/ \
+    | sed s/scale=/scale="$scale"/ \
+    | sed s/turn=/turn="$turn"/ \
+    | sed s/noautoscale=/noautoscale="$noautoscale"/ \
+    | sed s/openright=/openright="$openright"/ \
+    | sed s/column=/column="$column"/ \
+    | sed s/columnstrict=/columnstrict="$columnstrict"/ \
+    | sed s/papersize/"$paper"/ \
+    | sed s/templatesize/templatesize="$template_size"/ \
+    | sed s/orientation/"$orient"/ > "${tmp_texfile}"
+
+( cd $( dirname "$tmp_texfile") && pdflatex "$tmp_texfile" ) && mv "$tmp_pdffile" "$outputfile_name"
+echo NOT REALLY rm -rf "$tmpdir" 1>&2
+}
+
+make_fname_cropped () { # $1, $2 are the width and height of the cropped page
 	tmpdir=$(mktemp -d )
 	realfile=$( readlink -f "$pdf_fname" )
 	pushd "$tmpdir" 1>/dev/null
@@ -320,7 +407,8 @@ make_fname_cropped () {
 	tmpfile1=cropped.pdf
 	tmpfile2="$tmpdir"/cropped-2up.pdf
 	(cd "$tmpdir"; $PDFCROP --margins 15 "$realfile" "$tmpfile1" )
-	$PDFNUP --nup 2x1 --outfile "$tmpfile2" "$tmpdir"/"$tmpfile1"
+	#$PDFNUP --nup 2x1 --outfile "$tmpfile2" "$tmpdir"/"$tmpfile1"
+    inputfile_name=$( readlink -f "$tmpdir"/"$tmpfile1" ) outputfile_name="$tmpfile2" fake_pdfnup $1 $2
 	fname="$tmpfile2"
 	(cd "$tmpdir"; unlink "$tmpfile1" )
 	popd 1>/dev/null
@@ -330,13 +418,13 @@ if [[ $margins_ratio -le $crop_threshold ]]; then
 	case $( prompt_user $'It looks like margins account for at least half of the page area.\n
 Would you like to crop+2up before printing?' Yes No Preview ) in
 		(Yes)
-			make_fname_cropped
+			make_fname_cropped "$template_width" "$template_height"
 		;;
 		(No)
 		;;
 		(Preview)
 			oldfname="$fname"
-			make_fname_cropped
+			make_fname_cropped "$template_width" "$template_height"
 			eval `require_command mimeopen`
 			$MIMEOPEN -n "$fname" &
 			case $( prompt_user $'The preview should appear in a moment.\n\nPrint cropped version?' Yes No ) in
