@@ -21,7 +21,7 @@ done
 
 convert "$FNAME" -trim -fuzz "10%" -identify /dev/null | while read line; do
 	echo "$line" 1>&2
-	SED_EXPR="^${FNAME} PDF [0-9]*x[0-9]*=>\([0-9]*x[0-9]*\) \([0-9]*x[0-9]*[-+][0-9]*[-+][0-9]*\) .*"
+	SED_EXPR="^${FNAME}.* PDF [0-9]*x[0-9]*=>\([0-9]*x[0-9]*\) \([0-9]*x[0-9]*[-+][0-9]*[-+][0-9]*\) .*"
 	GEOMETRY=$( echo "$line" | sed "s~$SED_EXPR~\1~" )
 	PAGE_GEOMETRY=$( echo "$line" | sed "s~$SED_EXPR~\2~" )
 
