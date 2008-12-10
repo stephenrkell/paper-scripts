@@ -69,12 +69,19 @@ optvars=$( "$LPR_PARSEOPTS" "$@" | sed 's/^/export /' )
 eval $optvars
 
 # For each file to print
-fnames=$( printenv | grep 'LPR_OPT_filename' | sed 's/LPR_OPT_filename[^=]*=//' )
+declare -a fnames
+ctr=0
+lines=$( printenv | grep 'LPR_OPT_filename' | sed 's/LPR_OPT_filename[^=]*=//' )
+while read line; do
+	fnames[$ctr]="$line"
+    ctr=$(( $ctr + 1 ))
+done <<<"$lines"
 
-if test -z "$fnames"; then
+if test -z "${fnames[@]}"; then
 	tmpfile=$(mktemp)
 	cat > "$tmpfile"
-	fnames="$tmpfile"
+	fnames[0]="$tmpfile"
+    ctr=1
 fi
 
 prompt_user () {
@@ -110,7 +117,9 @@ prompt_user () {
 }
 
 # start of main loop, iterating over filenames passed as arguments
-for fname in $fnames; do
+for fname in "${fnames[@]}"; do
+
+echo "fname is $fname" 1>&2
 
 fbasename=$( basename "$fname" )
 
