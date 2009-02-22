@@ -451,8 +451,7 @@ Would you like to crop+2up before printing?' Yes No Preview ) in
 fi
 
 # Run the lpr-wrapper- - it should ignore LPR_OPT_filename.*! # if printing succeeds, record that the paper was printed
-${LPR_WRAPPER} "$fname" && ( \	
-	saved_umask=`umask`
+${LPR_WRAPPER} "$fname" && ( saved_umask=`umask`
 	umask 022
 	echo -e "${USER}\t`date -R`\t${fbasename}\t${filetype}\t${fsize}\t${first_words}" >> "${store_path}/${USER}"
 	umask $saved_umask
