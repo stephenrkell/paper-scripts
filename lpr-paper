@@ -223,6 +223,7 @@ convert_geometry () {
 		if [ -z "$GEOMETRY" ] || [ -z "$PAGE_GEOMETRY" ]; then
 			echo "Couldn't get bounding box for file $FNAME" 1>&2
 			echo "GEOMETRY is $GEOMETRY, PAGE_GEOMETRY is $PAGE_GEOMETRY" 1>&2
+			break
 		else
 			if [ "$PAGE_GEOMETRY" = "1x1-1-1" ]; then
 				XMIN=0; YMIN=0; XMAX=0; YMAX=0
@@ -259,7 +260,7 @@ greatest_margins_ratio () {
 		done
 		# now our variables contain the data corresponding to page $page_num
 		# calculate the ratio of the cropped area to the uncropped area
-		this_ratio=$(( ( $cx * $cy * 1000 ) / ( $uncx * $uncy ) ))
+		this_ratio=$(( ( ${cx:-1} * ${cy:-1} * 1000 ) / ( ${uncx:-1} * ${uncy:-1} ) ))
 		echo "Calculated a ratio of $this_ratio" 1>&2
 		if [[ $this_ratio -gt $greatest_ratio ]]; then
 			greatest_ratio=$this_ratio
