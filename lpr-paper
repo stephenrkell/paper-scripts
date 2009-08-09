@@ -45,6 +45,20 @@ make_match_any_line_regexp () {
     	sed 's/\f$/\n/' | sed 's/\f/\\|/g' |  sed 's/^$/\^\$/'
 }
 
+debug_print () {
+	if [[ -n "$DEBUG_PRINT" ]]; then
+		echo $@ 1>&2
+	fi
+}
+
+debug_cat () {
+	if [[ -n "$DEBUG_PRINT" ]]; then
+		cat 1>&2
+	else
+		cat >/dev/null
+	fi
+}
+
 eval `require_command lpr-parseopts`
 eval `require_command lpr-wrapper`
 #eval `require_command xmessage`
@@ -61,7 +75,7 @@ else
 	echo "You should install gsfake-convertbb to fix this." 1>&2
 fi
 
-#echo commands: $LPR_PARSEOPTS $LPR_WRAPPER
+debug_print commands: $LPR_PARSEOPTS $LPR_WRAPPER
 #exit 0
 
 # parse our LPR options and set the appropriate environment variables
@@ -93,7 +107,7 @@ prompt_user () {
         xmessage -buttons "${buttons_string}" "${message_text}"; response="$?"
         ord=$(( $response - 100 ))
         answer=${!ord}
-        #echo "answer is $answer" 1>&2
+        #debug_print "answer is $answer"
 		echo "$answer"
     else
 		tty=$(tty) || exit 1
@@ -103,7 +117,7 @@ prompt_user () {
 		read response < "$tty"
 		while true; do
 			option="$1"
-			echo "Testing response $response against option $option" 1>&2
+			#debug_print "Testing response $response against option $option"
 			if [[ -z "$option" ]]; then
 				break
 			fi
@@ -119,7 +133,7 @@ prompt_user () {
 # start of main loop, iterating over filenames passed as arguments
 for fname in "${fnames[@]}"; do
 
-echo "fname is $fname" 1>&2
+debug_print "fname is $fname"
 
 fbasename=$( basename "$fname" )
 
@@ -164,7 +178,7 @@ TAB=$'\t'
 human_readable_matches=""
 match_expr="[^${TAB}]*${TAB}[^${TAB}]*${TAB}${fbasename}${TAB}${filetype}${TAB}${fsize}${TAB}.*"
 matches=$( grep -h "$match_expr" "${store_path}"/* )
-echo "Expression '${match_expr}' gave matches: $matches" 1>&2
+debug_print "Expression '${match_expr}' gave matches: $matches"
 if test -n "$matches"; then
 	human_readable_matches="${human_readable_matches}"$'\n'$( echo "$matches" | \
 		sed -r 's/([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\t]*)/User \1 printed the same file on \2/' )
@@ -173,14 +187,14 @@ fi
 # exclude them from the next match (to avoid duplicated results). 
 omit_regexp=$( echo "$matches" | make_match_any_line_regexp )
 if test -n "$first_words"; then
-	#echo -n "First words hexdump: " 1>&2; hexdump -C <<<"$first_words" 1>&2
+	#debug_print -n "First words hexdump: " 1>&2; hexdump -C <<<"$first_words"
     escaped_first_words=$( echo "$first_words" | escape_regexp )
 	match_expr="^[^${TAB}]*${TAB}[^${TAB}]*${TAB}[^${TAB}]*${TAB}[^${TAB}]*${TAB}[^${TAB}]*${TAB}${escaped_first_words}"'$'
-	echo "Omit_regexp is $omit_regexp" | sed 's/\t/\\t/g' 1>&2
-    echo "Lines matching omit_regexp: " 1>&2
-    cat "${store_path}"/* | grep "$omit_regexp" 1>&2
+	#debug_print "Omit_regexp is $omit_regexp" | sed 's/\t/\\t/g'
+    #debug_print "Lines matching omit_regexp: "
+    cat "${store_path}"/* | grep "$omit_regexp" | debug_cat
     matches=$( cat "${store_path}"/* | grep -v "$omit_regexp" | grep -h "$match_expr" )
-	echo "Expression '${match_expr}' gave matches: $matches" 1>&2
+	debug_print "Expression '${match_expr}' gave matches: $matches"
 	if test -n "$matches"; then
 		human_readable_matches="${human_readable_matches}"$'\n'$( echo "$matches" | \
 			sed -r 's/([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\t]*)/User \1 printed probably the same text on \2/' )
@@ -255,13 +269,13 @@ greatest_margins_ratio () {
 		while [[ "$1" -gt "$page_num" ]]; do
 			# we're not yet on the correct page number, so read a line
 			read text1 uncx uncy text2 cx cy
-			echo "text1 uncx uncy text2 cx cy: $text1 $uncx $uncy $text2 $cx $cy" 1>&2
+			debug_print "text1 uncx uncy text2 cx cy: $text1 $uncx $uncy $text2 $cx $cy"
 			page_num=$(( $page_num + 1 ))
 		done
 		# now our variables contain the data corresponding to page $page_num
 		# calculate the ratio of the cropped area to the uncropped area
 		this_ratio=$(( ( ${cx:-1} * ${cy:-1} * 1000 ) / ( ${uncx:-1} * ${uncy:-1} ) ))
-		echo "Calculated a ratio of $this_ratio" 1>&2
+		debug_print "Calculated a ratio of $this_ratio"
 		if [[ $this_ratio -gt $greatest_ratio ]]; then
 			greatest_ratio=$this_ratio
 		fi
@@ -290,7 +304,7 @@ if grep "^Processing pages" <<<"$GS_OUTPUT"; then # if we get a "Processing page
 else # we didn't get a Processing pages... header, count lines
 	NUM_PAGES=$( echo "$GS_OUTPUT" | grep '^%%BoundingBox' | wc -l )
 fi
-echo "Detected that the document has $NUM_PAGES pages!" 1>&2
+debug_print "Detected that the document has $NUM_PAGES pages!"
 # note that we could potentially use the gs output for bounding box data,
 # but we don't trust gs's bounding box info! we use convert instead
 
@@ -298,7 +312,7 @@ echo "Detected that the document has $NUM_PAGES pages!" 1>&2
 # if/when we do decide to crop the paper. Maybe we can use gsfake-convertbb
 # rather than gs, and background the job rather than killing it?
 
-CONVERT_GEOMETRY_OUTPUT=$( convert_geometry "$fname" )
+CONVERT_GEOMETRY_OUTPUT=$( convert_geometry "$fname" 2>/dev/null )
 template_page_number=1
 case "$NUM_PAGES" in
 	(''|0) echo "Error: file $fname has an invalid number of pages ($NUM_PAGES)!" 1>&2
@@ -306,28 +320,28 @@ case "$NUM_PAGES" in
 	;;
 	(1|2)	margins_ratio=$( echo "$CONVERT_GEOMETRY_OUTPUT" | greatest_margins_ratio 1 )
     		template_page_number=$?
-			echo "Margins ratio is $margins_ratio" 1>&2
+			debug_print "Margins ratio is $margins_ratio"
 	;;
 	(3|4|5)	margins_ratio=$( echo "$CONVERT_GEOMETRY_OUTPUT" | greatest_margins_ratio 2 )
 			template_page_number=$?
-			echo "Margins ratio is $margins_ratio" 1>&2
+			debug_print "Margins ratio is $margins_ratio"
 	;;
 	(6|7|8)	margins_ratio=$( echo "$CONVERT_GEOMETRY_OUTPUT" | greatest_margins_ratio 2 4 )
 		    template_page_number=$?
-			echo "Margins ratio is $margins_ratio" 1>&2
+			debug_print "Margins ratio is $margins_ratio"
 	;;
 	(*)		margins_ratio=$( echo "$CONVERT_GEOMETRY_OUTPUT" | greatest_margins_ratio 2 4 7 )
 		    template_page_number=$?
-			echo "Margins ratio is $margins_ratio" 1>&2
+			debug_print "Margins ratio is $margins_ratio"
 	;;
 esac
 
-echo "template_page_number is $template_page_number" 1>&2
+debug_print "template_page_number is $template_page_number"
 template_page_geometry=$( echo "$CONVERT_GEOMETRY_OUTPUT" | sed -n "$template_page_number p" )
-echo "template_page_geometry is $template_page_geometry" 1>&2
+debug_print "template_page_geometry is $template_page_geometry"
 template_width=$( echo $template_page_geometry | sed 's/.*Cropped: *\([0-9]\+\) *\([0-9]\+\).*/\1/' )
 template_height=$( echo $template_page_geometry | sed 's/.*Cropped: *\([0-9]\+\) *\([0-9]\+\).*/\2/' )
-echo "template width, height are $template_width, $template_height" 1>&2
+debug_print "template width, height are $template_width, $template_height" 
 
 crop_threshold=500 # if cropping takes it down to half the area or less, 2up is a good idea
 
@@ -338,6 +352,8 @@ tmpdir=""
 tmpfile1=""
 tmpfile2=""
 
+# FIXME: remove this function once pdfnup supports the templatesize option!
+# It is a copy of most of pdfnup, but patched. I did submit the patch upstream....
 fake_pdfnup () {
 ##  Now specify the default settings for pdfnup:
 ##
@@ -452,6 +468,7 @@ Would you like to crop+2up before printing?' Yes No Preview ) in
 fi
 
 # Run the lpr-wrapper- - it should ignore LPR_OPT_filename.*! # if printing succeeds, record that the paper was printed
+debug_print PRINTER is: $PRINTER
 ${LPR_WRAPPER} "$fname" && ( saved_umask=`umask`
 	umask 022
 	echo -e "${USER}\t`date -R`\t${fbasename}\t${filetype}\t${fsize}\t${first_words}" >> "${store_path}/${USER}"

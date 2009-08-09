@@ -20,4 +20,6 @@ while read opt; do
 done <<<"$opts"
 
 #echo "$filenames" | echo xargs lpr ${argstring} 
+printenv 1>&2
+echo "$@" 1>&2
 lpr ${argstring} "$@"
