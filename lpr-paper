@@ -479,7 +479,7 @@ ${LPR_WRAPPER} "$fname" && ( saved_umask=`umask`
 			"not world-readable. Please correct this at your earliest convenience.\n\nThank you.\n\n$0" | fmt | mail -s "A message from $0" "$USER"
 	fi
 
-)
+) && echo 'Success!' 1>&2
 
 if [[ ! -z "$tmpfile2" ]]; then	unlink "$tmpfile2"; fi
 # TODO: also delete temporary PDF file if it was created

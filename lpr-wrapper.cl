@@ -15,7 +15,7 @@ while read opt; do
 		LPR_OPT_filename*) #filenames="$filenames"$'\n'"$opt_val" ;;
 			;;
 		LPR_OPT_fullcmd) ;; # ignore this
-		*)	echo "Unrecognised option key: $opt_key" 1>&2 ;;
+		*)	echo "Warning: unrecognised option key: $opt_key" 1>&2 ;;
 	esac
 done <<<"$opts"
 
