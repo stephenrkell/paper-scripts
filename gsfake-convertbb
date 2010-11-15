@@ -20,10 +20,10 @@ done
 # to turn convert's output into a gs-style bbox string
 
 convert "$FNAME" -trim -fuzz "10%" -identify /dev/null | while read line; do
-	echo "$line" 1>&2
-	SED_EXPR="^${FNAME}.* PDF [0-9]*x[0-9]*=>\([0-9]*x[0-9]*\) \([0-9]*x[0-9]*[-+][0-9]*[-+][0-9]*\) .*"
-	GEOMETRY=$( echo "$line" | sed "s~$SED_EXPR~\1~" )
-	PAGE_GEOMETRY=$( echo "$line" | sed "s~$SED_EXPR~\2~" )
+	#echo "$line" 1>&2
+	SED_EXPR="^${FNAME}.* P\(DF\|S\) [0-9]*x[0-9]*=>\([0-9]*x[0-9]*\) \([0-9]*x[0-9]*[-+][0-9]*[-+][0-9]*\) .*"
+	GEOMETRY=$( echo "$line" | sed "s~$SED_EXPR~\2~" )
+	PAGE_GEOMETRY=$( echo "$line" | sed "s~$SED_EXPR~\3~" )
 
 	if [ -z "$GEOMETRY" ] || [ -z "$PAGE_GEOMETRY" ]; then
 		echo "Couldn't get bounding box for file $FNAME" 1>&2
@@ -31,7 +31,7 @@ convert "$FNAME" -trim -fuzz "10%" -identify /dev/null | while read line; do
 	else
 		if [ "$PAGE_GEOMETRY" = "1x1-1-1" ]; then
 			XMIN=0; YMIN=0; XMAX=0; YMAX=0
-			XMAX
+			#XMAX
 		else
 			UNCROPPED_SIZE_X=$( echo $PAGE_GEOMETRY | sed 's/\([0-9]*\)x\([0-9]*\)[-+]\([0-9]*\)[-+]\([0-9]*\).*/\1/')
 			UNCROPPED_SIZE_Y=$( echo $PAGE_GEOMETRY | sed 's/\([0-9]*\)x\([0-9]*\)[-+]\([0-9]*\)[-+]\([0-9]*\).*/\2/')
