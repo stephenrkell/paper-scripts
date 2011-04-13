@@ -19,7 +19,9 @@ done
 # following is copied from pdf-reallycrop, shows calculations needed
 # to turn convert's output into a gs-style bbox string
 
-convert "$FNAME" -trim -fuzz "10%" -identify /dev/null | while read line; do
+#$CONVERT "$FNAME" -trim -fuzz "10%" -identify /dev/null | while read line; do
+# FIXME: had to get rid of fuzz because it was giving obviously wrong cropped geometry info on ImageMagick 6.5.8-10 2010-01-15 Q16
+convert "$FNAME" -trim -identify /dev/null | while read line; do
 	#echo "$line" 1>&2
 	SED_EXPR="^${FNAME}.* P\(DF\|S\) [0-9]*x[0-9]*=>\([0-9]*x[0-9]*\) \([0-9]*x[0-9]*[-+][0-9]*[-+][0-9]*\) .*"
 	GEOMETRY=$( echo "$line" | sed "s~$SED_EXPR~\2~" )

@@ -16,7 +16,7 @@
 # clever thing #2:
 # - to save paper, do automatic crop+2up where appropriate
 
-store_path=${STORE_PATH:-/usr/groups/netos/library/lpr-paper}
+store_path=${STORE_PATH:-/users/skell/test-lpr-paper-file}
 test -z "$USER" && USER=`whoami`
 
 require_command () {
@@ -140,16 +140,23 @@ fbasename=$( basename "$fname" )
 real_fname=$( readlink --canonicalize "$fname" )
 
 # ask file for the mime type of the file
-file_response=$( file -bi "$real_fname" )
+file_response=$( file -b --mime-type "$real_fname" )
 
 # Find out whether anyone else has printed this paper before
 
-# first work out file type to get first-words list
+# first work out file type,
+# to get first-words list
+# and make a PDF on the printer-configured paper size, for further processing
 case "$file_response" in
 	ERROR*) echo "Could not get filetype of ${fname}! Skipping." 1>&2; continue ;;
 	application/pdf) 
+		echo "Detected PDF file." 1>&2
 		filetype=pdf
-		pdf_fname="$fname"
+		pdf_fname=$(mktemp)
+        # use gs to create an approximation of the would-be-printed document/margins
+        gs -dBATCH -dNOPAUSE -sDEVICE=pdfwrite -sPAPERSIZE=a4 -dFIXEDMEDIA -sOutputFile="$pdf_fname" "$fname" || \
+        (echo "Error: gs failed!" 1>&2; false) || exit 1
+        # BUT use the original PDF file for word-extraction purposes, in case gs screws with this
 		first_words=$( $PDFTOTEXT "$fname" /dev/stdout | tr -s '[:space:]' ' ' | cut -d' ' -f1-10 )
 		;;
 	application/postscript)
@@ -164,7 +171,9 @@ case "$file_response" in
 			first_words=""
 		fi
 	;;
-	*)	filetype=unknown
+	*)	
+    	echo "Unknown file type: ${fname}" 1>&2
+    	filetype=unknown
 		first_words=''
 		;;
 esac
@@ -227,9 +236,17 @@ fi
 # Work out whether to crop+2up this paper
 # Pick a page of the paper to test for margin sizes
 # TODO: merge this code with the copy in gsfake-convertbb
+# -- difference is that this retains the uncropped size,
+# and calculates the cropped size,
+# whereas gsfake-convertbb just outputs the bb dimensions.
+# Easiest fix: remove the calculations from gsfake-convertbb,
+# and just put them into margins_ratio -- 
+# BUT this means reading in the raw page geometries somehow (from another fd?)
 convert_geometry () {
 	FNAME="$1"
-	$CONVERT "$FNAME" -trim -fuzz "10%" -identify /dev/null | while read line; do
+	#$CONVERT "$FNAME" -trim -fuzz "10%" -identify /dev/null | while read line; do
+    # FIXME: had to get rid of fuzz because it was giving obviously wrong cropped geometry info on ImageMagick 6.5.8-10 2010-01-15 Q16
+	$CONVERT "$FNAME" -trim -identify /dev/null | while read line; do
 		SED_EXPR="^${FNAME}.* P\(S\|DF\) [0-9]*x[0-9]*=>\([0-9]*x[0-9]*\) \([0-9]*x[0-9]*[-+][0-9]*[-+][0-9]*\) .*"
 		GEOMETRY=$( echo "$line" | grep "$SED_EXPR" | sed "s~$SED_EXPR~\2~" )
 		PAGE_GEOMETRY=$( echo "$line" | grep "$SED_EXPR" | sed "s~$SED_EXPR~\3~" )
@@ -296,8 +313,9 @@ greatest_margins_ratio () {
 # To avoid unnecessary delay, we want to quit gs (break the pipeline) when
 # either we see 'Processing pages...' on stdout, or when the linecount on
 # stderr reaches 18 (i.e. nine pages; there are two lines of output per page)
+debug_print "pdf_fname is $pdf_fname"
 GS_OUTPUT=$( \
-	( ( gs -sDEVICE=bbox -sOutputFile=/dev/stdout -dNOPAUSE -dBATCH "$fname" | \
+	( ( gs -sDEVICE=bbox -sOutputFile=/dev/stdout -dNOPAUSE -dBATCH "$pdf_fname" | \
 	sed '/^Processing pages/q' 1>&3 ) 2>&1 | head -n18 ) 3>&1 )
 if grep "^Processing pages" <<<"$GS_OUTPUT"; then # if we get a "Processing pages..." header from gs
 	NUM_PAGES=$( echo "$GS_OUTPUT" | grep "^Processing pages" | sed 's/.*Processing pages [0-9]* through \([0-9]*\).*/\1/' )
@@ -312,7 +330,7 @@ debug_print "Detected that the document has $NUM_PAGES pages!"
 # if/when we do decide to crop the paper. Maybe we can use gsfake-convertbb
 # rather than gs, and background the job rather than killing it?
 
-CONVERT_GEOMETRY_OUTPUT=$( convert_geometry "$fname" 2>/dev/null )
+CONVERT_GEOMETRY_OUTPUT=$( convert_geometry "$pdf_fname" 2>/dev/null )
 template_page_number=1
 case "$NUM_PAGES" in
 	(''|0) echo "Error: file $fname has an invalid number of pages ($NUM_PAGES)!" 1>&2
@@ -320,19 +338,19 @@ case "$NUM_PAGES" in
 	;;
 	(1|2)	margins_ratio=$( echo "$CONVERT_GEOMETRY_OUTPUT" | greatest_margins_ratio 1 )
     		template_page_number=$?
-			debug_print "Margins ratio is $margins_ratio"
+			echo "Margins ratio is $margins_ratio" 1>&2
 	;;
 	(3|4|5)	margins_ratio=$( echo "$CONVERT_GEOMETRY_OUTPUT" | greatest_margins_ratio 2 )
 			template_page_number=$?
-			debug_print "Margins ratio is $margins_ratio"
+			echo "Margins ratio is $margins_ratio" 1>&2
 	;;
 	(6|7|8)	margins_ratio=$( echo "$CONVERT_GEOMETRY_OUTPUT" | greatest_margins_ratio 2 4 )
 		    template_page_number=$?
-			debug_print "Margins ratio is $margins_ratio"
+			echo "Margins ratio is $margins_ratio" 1>&2
 	;;
 	(*)		margins_ratio=$( echo "$CONVERT_GEOMETRY_OUTPUT" | greatest_margins_ratio 2 4 7 )
 		    template_page_number=$?
-			debug_print "Margins ratio is $margins_ratio"
+			echo "Margins ratio is $margins_ratio" 1>&2
 	;;
 esac
 
@@ -425,38 +443,40 @@ EndTemplate
 echo NOT REALLY rm -rf "$tmpdir" 1>&2
 }
 
-make_fname_cropped () { # $1, $2 are the width and height of the cropped page
-	tmpdir=$(mktemp -d )
+make_pdf_fname_cropped () { # $1, $2 are the width and height of the cropped page
+	my_tmpdir=$(mktemp -d )
 	realfile=$( readlink -f "$pdf_fname" )
-	pushd "$tmpdir" 1>/dev/null
+	pushd "$my_tmpdir" 1>/dev/null
 	made_tmp=1
 	tmpfile1=cropped.pdf
-	tmpfile2="$tmpdir"/cropped-2up.pdf
-	(cd "$tmpdir"; $PDFCROP --margins 15 "$realfile" "$tmpfile1" )
-	#$PDFNUP --nup 2x1 --outfile "$tmpfile2" "$tmpdir"/"$tmpfile1"
-    inputfile_name=$( readlink -f "$tmpdir"/"$tmpfile1" ) outputfile_name="$tmpfile2" fake_pdfnup $1 $2
-	fname="$tmpfile2"
-	(cd "$tmpdir"; unlink "$tmpfile1" )
+	tmpfile2="$my_tmpdir"/cropped-2up.pdf
+	$PDFCROP --margins 15 "$realfile" "$tmpfile1"
+	#$PDFNUP --nup 2x1 --outfile "$tmpfile2" "$my_tmpdir"/"$tmpfile1"
+    inputfile_name=$( readlink -f "$my_tmpdir"/"$tmpfile1" ) outputfile_name="$tmpfile2" fake_pdfnup $1 $2
+    cd "$my_tmpdir" # in case fake_pdfnup clobbered pwd
+	pdf_fname="$tmpfile2"
+	unlink "$tmpfile1"
 	popd 1>/dev/null
+    # check that fname still exists
 }
 
 if [[ $margins_ratio -le $crop_threshold ]]; then
 	case $( prompt_user $'It looks like margins account for at least half of the page area.\n
 Would you like to crop+2up before printing?' Yes No Preview ) in
 		(Yes)
-			make_fname_cropped "$template_width" "$template_height"
+			make_pdf_fname_cropped "$template_width" "$template_height"
 		;;
 		(No)
 		;;
 		(Preview)
 			oldfname="$fname"
-			make_fname_cropped "$template_width" "$template_height"
+			make_pdf_fname_cropped "$template_width" "$template_height"
 			eval `require_command mimeopen`
-			$MIMEOPEN -n "$fname" &
+			$MIMEOPEN -n "$pdf_fname" &
 			case $( prompt_user $'The preview should appear in a moment.\n\nPrint cropped version?' Yes No ) in
 				(Yes)
 				;;
-				(No) fname="$oldfname";
+				(No) pdf_fname="$oldfname";
 				;;
 				(*) echo "Didn't understand the response from prompt_user." 1>&2; continue
 				;;
@@ -469,7 +489,8 @@ fi
 
 # Run the lpr-wrapper- - it should ignore LPR_OPT_filename.*! # if printing succeeds, record that the paper was printed
 debug_print PRINTER is: $PRINTER
-${LPR_WRAPPER} "$fname" && ( saved_umask=`umask`
+debug_print ${LPR_WRAPPER} "$pdf_fname"
+${LPR_WRAPPER} "$pdf_fname" && ( saved_umask=`umask`
 	umask 022
 	echo -e "${USER}\t`date -R`\t${fbasename}\t${filetype}\t${fsize}\t${first_words}" >> "${store_path}/${USER}"
 	umask $saved_umask
@@ -482,7 +503,8 @@ ${LPR_WRAPPER} "$fname" && ( saved_umask=`umask`
 ) && echo 'Success!' 1>&2
 
 if [[ ! -z "$tmpfile2" ]]; then	unlink "$tmpfile2"; fi
-# TODO: also delete temporary PDF file if it was created
+# also delete temporary PDF file if it was created
+#unlink "$pdf_fname"
 
 # continue to the next filename
 done
