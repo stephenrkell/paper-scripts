@@ -91,7 +91,7 @@ while read line; do
     ctr=$(( $ctr + 1 ))
 done <<<"$lines"
 
-if test -z "${fnames[@]}"; then
+if test -z "${fnames[*]}"; then
 	tmpfile=$(mktemp)
 	cat > "$tmpfile"
 	fnames[0]="$tmpfile"
