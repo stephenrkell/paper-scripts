@@ -16,7 +16,7 @@
 # clever thing #2:
 # - to save paper, do automatic crop+2up where appropriate
 
-store_path=${STORE_PATH:-/users/skell/test-lpr-paper-file}
+store_path=${STORE_PATH:-/users/skell/lpr-paper}
 test -z "$USER" && USER=`whoami`
 
 require_command () {

@@ -1,0 +1,101 @@
+#!/bin/sh
+
+# Standard CUPS lpr options parser 
+
+#Usage: /usr/bin/lpr [OPTION] [ file(s) ]
+#Print files.
+#
+#  -E                       force encryption
+#  -H server[:port]         specify alternate server
+#  -C title, -J title, -T title
+#                           set the job name
+#
+#  -P destination/instance  print to named printer
+#  -U username              specify alternate username
+#  -# num-copies            set number of copies
+#  -h                       disable banner printing
+#  -l                       print without filtering
+#  -m                       send email on completion
+#  -o option[=value]        set a job option
+#  -p                       format text file with header
+#  -q                       hold job for printing
+#  -r                       delete files after printing
+
+# use getopt to capture these
+TEMP=`getopt -q -o "EhlmpqrH:C:J:T:P:U:#:o:" -n $(basename $0) -- "$@"`
+eval set -- "$TEMP"
+while true; do case "$1" in
+        -E) LPR_OPT_encrypt=1 ;; 
+        -h) LPR_OPT_disable_banner=1 ;;
+        -l) LPR_OPT_disable_filtering=1 ;;
+        -m) LPR_OPT_mail_on_completion=1 ;;
+        -p) LPR_OPT_add_header_to_text=1 ;;
+        -q) LPR_OPT_hold_job=1 ;; 
+        -r) LPR_OPT_delete_after_printing=1 ;;
+        -H) LPR_OPT_server_port="$2"; shift ;;
+        -C) LPR_OPT_title="$2"; shift ;;
+        -J) LPR_OPT_title="$2"; shift ;;
+        -T) LPR_OPT_title="$2"; shift ;;
+        -P) LPR_OPT_dest="$2"; shift ;;
+        -U) LPR_OPT_username="$2"; shift ;;
+        -'#') LPR_OPT_copies="$2"; shift ;;
+        -o) key="$( echo "$2" | sed 's/^\([-a-z0-9A-Z]*\)=\?.*/\L/\1\E/' )"
+            val="$( echo "$2" | sed 's/^\([-a-z0-9A-Z]*\)=\?//' )"
+            shift
+            case "$key" in
+                (media) ;;
+                (orientation) ;;
+                (orientation-requested) ;;
+                (landscape) ;;
+                (sides) ;;
+                (job-sheets) ;;
+                (job-hold-until) ;;
+                (job-priority) ;;
+                (page-ranges) ;;
+                (page-set) ;;
+                (number-up) ;;
+                (page-border) ;;
+                (number-up-layout) ;;
+                (fit-to-page) ;;
+                (outputorder) ;; 
+                (mirror) ;;
+                (raw) ;;
+                (cpi) ;;
+                (lpi) ;;
+                (columns) ;;
+                (page-left) ;;
+                (page-right) ;;
+                (page-top) ;;
+                (page-bottom) ;;
+                (prettyprint) ;;
+                (nowrap) ;;
+                (position) ;;
+                (scaling) ;;
+                (fit-to-page) ;;
+                (ppi) ;;
+                (natural-scaling) ;;
+                (staple) LPR_OPT_staple=1 ;;
+                (*) echo "Warning: unrecognised option $key" 1>&2
+            esac
+            ;;
+        --) #FNAME="$2";;
+            shift; break
+        esac
+        shift || break
+done
+ctr=0
+
+escape_shell () {
+     sed 's/[\$()"'"'"'{}\*?]/\\&/g'
+}
+
+# now build the filename options
+while true; do
+	if [ -z "$1" ]; then break; fi
+	eval $( echo export LPR_OPT_filename${ctr}="$( echo "$1" | escape_shell )" | escape_shell )
+    ctr=$(( $ctr + 1 ))
+    shift || break
+done
+# now write some output
+printenv | grep '^LPR_OPT_'
+
