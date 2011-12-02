@@ -29,7 +29,7 @@ case "${script_owner}:${script_group}" in
         store_path=${STORE_PATH:-$( eval echo ~${script_owner} )/lpr-paper}
         ;;
 esac
-echo "guessed store_path $store_path" 1>&2
+#echo "guessed store_path $store_path" 1>&2
 
 require_command () {
     varname=$( echo "$1" | tr '[:lower:]' '[:upper:]' | tr '-' '_' )
