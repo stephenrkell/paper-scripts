@@ -16,8 +16,20 @@
 # clever thing #2:
 # - to save paper, do automatic crop+2up where appropriate
 
-store_path=${STORE_PATH:-/users/skell/lpr-paper}
 test -z "$USER" && USER=`whoami`
+
+# Guess where the store lives
+script_owner="$( stat -c %U "$0" )"
+script_group="$( stat -c %G "$0" )"
+case "${script_owner}:${script_group}" in
+    (*:netos)
+        store_path=${STORE_PATH:-/usr/groups/netos/library/lpr-paper}
+        ;;
+    (*)
+        store_path=${STORE_PATH:-$( eval echo ~${script_owner} )/lpr-paper}
+        ;;
+esac
+echo "guessed store_path $store_path" 1>&2
 
 require_command () {
     varname=$( echo "$1" | tr '[:lower:]' '[:upper:]' | tr '-' '_' )
