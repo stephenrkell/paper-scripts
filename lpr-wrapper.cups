@@ -6,17 +6,17 @@
 opts=$( printenv | grep '^LPR_OPT_' )
 space=${IFS:- }
 while read opt; do
-	opt_key=$( echo "$opt" | sed 's/=.*//' )
-	opt_val=$( echo "$opt" | sed 's/.*=//' )
-	case "$opt_key" in
-		LPR_OPT_p) argstring="${argstring}${space}-o page-ranges=${opt_val}" ;;
-		LPR_OPT_staple) argstring="${argstring}${space}-o staple=${opt_val}" ;;
-		LPR_OPT_printer|LPR_OPT_Printer) argstring="${argstring}${space}-P ${opt_val}" ;;
-		LPR_OPT_filename*) #filenames="$filenames"$'\n'"$opt_val" ;;
-			;;
-		LPR_OPT_fullcmd) ;; # ignore this
-		*)	echo "Warning: unrecognised option key: $opt_key" 1>&2 ;;
-	esac
+    opt_key=$( echo "$opt" | sed 's/=.*//' )
+    opt_val=$( echo "$opt" | sed 's/.*=//' )
+    case "$opt_key" in
+        LPR_OPT_p) argstring="${argstring}${space}-o page-ranges=${opt_val}" ;;
+        LPR_OPT_staple) argstring="${argstring}${space}-o staple=${opt_val}" ;;
+        LPR_OPT_printer|LPR_OPT_Printer) argstring="${argstring}${space}-P ${opt_val}" ;;
+        LPR_OPT_filename*) #filenames="$filenames"$'\n'"$opt_val" ;;
+            ;;
+        LPR_OPT_fullcmd) ;; # ignore this
+        *)    echo "Warning: unrecognised option key: $opt_key" 1>&2 ;;
+    esac
 done <<<"$opts"
 
 #echo "$filenames" | echo xargs lpr ${argstring} 

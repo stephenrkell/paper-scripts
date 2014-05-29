@@ -23,7 +23,7 @@ expr4='^(LPR)?([^ ]*) *type *(.*[^ ]) *$'
 expr5='^(LPR)?file name ([0-9]+) is *(.*)$'
 
 lpr.cl -noprint -debug "$@" | egrep "$expr1|$expr2|$expr3|$expr4|$expr5" \
-	 | sed -r \
+     | sed -r \
 "/$expr1/ { s/$expr1/LPR_OPT_\2=\"\3\"/ "$'\n'"p"$'\n'"d }
 /$expr2/ { s/$expr2/LPR_OPT_\2=\"\3\"/ "$'\n'"p"$'\n'"d }
 /$expr3/ { s/$expr3/LPR_OPT_\2=\"\3\"/ "$'\n'"p"$'\n'"d }

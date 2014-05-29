@@ -9,10 +9,10 @@ TEMP=`getopt -q -o f: -n $(basename $0) -- "$@"`
 eval set -- "$TEMP"
 while true; do case "$1" in
 
-	-f) 	FNAME="$2"
-	;;
-	esac
-	shift || break
+    -f)     FNAME="$2"
+    ;;
+    esac
+    shift || break
 done
 #echo "FNAME is $FNAME" 1>&2
 
@@ -22,30 +22,30 @@ done
 #$CONVERT "$FNAME" -trim -fuzz "10%" -identify /dev/null | while read line; do
 # FIXME: had to get rid of fuzz because it was giving obviously wrong cropped geometry info on ImageMagick 6.5.8-10 2010-01-15 Q16
 convert "$FNAME" -trim -identify /dev/null | while read line; do
-	#echo "$line" 1>&2
-	SED_EXPR="^${FNAME}.* P\(DF\|S\) [0-9]*x[0-9]*=>\([0-9]*x[0-9]*\) \([0-9]*x[0-9]*[-+][0-9]*[-+][0-9]*\) .*"
-	GEOMETRY=$( echo "$line" | sed "s~$SED_EXPR~\2~" )
-	PAGE_GEOMETRY=$( echo "$line" | sed "s~$SED_EXPR~\3~" )
+    #echo "$line" 1>&2
+    SED_EXPR="^${FNAME}.* P\(DF\|S\) [0-9]*x[0-9]*=>\([0-9]*x[0-9]*\) \([0-9]*x[0-9]*[-+][0-9]*[-+][0-9]*\) .*"
+    GEOMETRY=$( echo "$line" | sed "s~$SED_EXPR~\2~" )
+    PAGE_GEOMETRY=$( echo "$line" | sed "s~$SED_EXPR~\3~" )
 
-	if [ -z "$GEOMETRY" ] || [ -z "$PAGE_GEOMETRY" ]; then
-		echo "Couldn't get bounding box for file $FNAME" 1>&2
-		echo "GEOMETRY is $GEOMETRY, PAGE_GEOMETRY is $PAGE_GEOMETRY" 1>&2
-	else
-		if [ "$PAGE_GEOMETRY" = "1x1-1-1" ]; then
-			XMIN=0; YMIN=0; XMAX=0; YMAX=0
-			#XMAX
-		else
-			UNCROPPED_SIZE_X=$( echo $PAGE_GEOMETRY | sed 's/\([0-9]*\)x\([0-9]*\)[-+]\([0-9]*\)[-+]\([0-9]*\).*/\1/')
-			UNCROPPED_SIZE_Y=$( echo $PAGE_GEOMETRY | sed 's/\([0-9]*\)x\([0-9]*\)[-+]\([0-9]*\)[-+]\([0-9]*\).*/\2/')
-			XMIN=$( echo $PAGE_GEOMETRY             | sed 's/\([0-9]*\)x\([0-9]*\)[-+]\([0-9]*\)[-+]\([0-9]*\).*/\3/')
-			YMIN_FROM_BOTTOM=$( echo $PAGE_GEOMETRY | sed 's/\([0-9]*\)x\([0-9]*\)[-+]\([0-9]*\)[-+]\([0-9]*\).*/\4/')
-			CROPPED_SIZE_X=$( echo $GEOMETRY | sed 's/\([0-9]*\)x\([0-9]*\).*/\1/')
-			CROPPED_SIZE_Y=$( echo $GEOMETRY | sed 's/\([0-9]*\)x\([0-9]*\).*/\2/')
-			YMAX=$(( $UNCROPPED_SIZE_Y - $YMIN_FROM_BOTTOM ))
-			YMIN=$(( $YMAX - $CROPPED_SIZE_Y ))
-			XMAX=$(( $XMIN + $CROPPED_SIZE_X ))
-		fi
-		echo "%%BoundingBox: $XMIN $YMIN $XMAX $YMAX" 1>&2
-		echo "%%HiResBoundingBox: $XMIN.000000 $YMIN.000000 $XMAX.000000 $YMAX.000000" 1>&2
-	fi	
+    if [ -z "$GEOMETRY" ] || [ -z "$PAGE_GEOMETRY" ]; then
+        echo "Couldn't get bounding box for file $FNAME" 1>&2
+        echo "GEOMETRY is $GEOMETRY, PAGE_GEOMETRY is $PAGE_GEOMETRY" 1>&2
+    else
+        if [ "$PAGE_GEOMETRY" = "1x1-1-1" ]; then
+            XMIN=0; YMIN=0; XMAX=0; YMAX=0
+            #XMAX
+        else
+            UNCROPPED_SIZE_X=$( echo $PAGE_GEOMETRY | sed 's/\([0-9]*\)x\([0-9]*\)[-+]\([0-9]*\)[-+]\([0-9]*\).*/\1/')
+            UNCROPPED_SIZE_Y=$( echo $PAGE_GEOMETRY | sed 's/\([0-9]*\)x\([0-9]*\)[-+]\([0-9]*\)[-+]\([0-9]*\).*/\2/')
+            XMIN=$( echo $PAGE_GEOMETRY             | sed 's/\([0-9]*\)x\([0-9]*\)[-+]\([0-9]*\)[-+]\([0-9]*\).*/\3/')
+            YMIN_FROM_BOTTOM=$( echo $PAGE_GEOMETRY | sed 's/\([0-9]*\)x\([0-9]*\)[-+]\([0-9]*\)[-+]\([0-9]*\).*/\4/')
+            CROPPED_SIZE_X=$( echo $GEOMETRY | sed 's/\([0-9]*\)x\([0-9]*\).*/\1/')
+            CROPPED_SIZE_Y=$( echo $GEOMETRY | sed 's/\([0-9]*\)x\([0-9]*\).*/\2/')
+            YMAX=$(( $UNCROPPED_SIZE_Y - $YMIN_FROM_BOTTOM ))
+            YMIN=$(( $YMAX - $CROPPED_SIZE_Y ))
+            XMAX=$(( $XMIN + $CROPPED_SIZE_X ))
+        fi
+        echo "%%BoundingBox: $XMIN $YMIN $XMAX $YMAX" 1>&2
+        echo "%%HiResBoundingBox: $XMIN.000000 $YMIN.000000 $XMAX.000000 $YMAX.000000" 1>&2
+    fi    
 done
