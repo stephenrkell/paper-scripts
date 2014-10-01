@@ -89,7 +89,7 @@ blah_browse () {
 	http_referer="$1"	
 }
 
-search_keywords=$( paper-keywords "$PAPER" )
+search_keywords=$( paper-keywords "$PAPER" | head -n1 )
 test -n "$search_keywords" || (echo "Sorry, paper-keywords failed to extract any keywords from this paper." 1>&2; false) || exit 1
 echo "keywords are $search_keywords" 1>&2
 

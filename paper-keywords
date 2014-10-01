@@ -75,7 +75,6 @@ complete_spellchecked_sentence () {
 	sentence_lines | \
 		pass_line_if_candidate_sentence | \
 		pass_line_if_spellchecks | \
-		head -n1 | \
 		rewrite_sentence_as_keyword
 }
 
@@ -96,19 +95,19 @@ alternation_by_line () {
 PAPER="$1"
 
 get_paper_text () {
-	MIMETYPE=$( file -bi "$1" )
+	MIMETYPE=$( file --mime-type -b "$1" )
 	case "$MIMETYPE" in
-		application/pdf) # skip page 1, because it may be boilerplate
+		(application/pdf) # skip page 1, because it may be boilerplate
 			pdftotext -f 2 "$PAPER" /dev/stdout | tr -s '\n'
 			;;
-		application/postscript)
+		(application/postscript)
 			which ps2pdf >/dev/null || (echo "Postscript file found but no ps2pdf." 1>&2; false) ||	exit 1
 			tmpfile=$(mktemp)
 			ps2pdf "$PAPER" "$tmpfile"
 			pdftotext -f 2 "$tmpfile" /dev/stdout
 			rm -f "$tmpfile"
 			;;			
-		*)	echo "Sorry, mimetype $MIMETYPE is not yet supported!" 1>&2; exit 1
+		(*)	echo "Sorry, mimetype $MIMETYPE is not yet supported!" 1>&2; exit 1
 			;;
 	esac
 }
