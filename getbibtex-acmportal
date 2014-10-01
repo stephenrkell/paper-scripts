@@ -1,0 +1,25 @@
+#!/bin/bash
+
+# Downloads the bibtex from a citation page on portal.acm.org
+
+URL="$1"
+which html2text >/dev/null || (echo "You must have a 'html2text' command available." 1>&2; false) || exit 1
+test -n "$URL" || (echo "You must specify the URL of a citation page." 1>&2; false) || exit 1
+
+#url_regex='http://portal.acm.org/citation.cfm?id=\([0-9]*\).\([0-9]*\)&coll=\([A-Za-z]*\)&dl=\([A-Za-z]*\)&CFID=\([0-9]*\)&CFTOKEN=\([0-9]*\)#'
+#           http://portal.acm.org/citation.cfm?id=503209.503224&coll=Portal&dl=GUIDE&CFID=64957549&CFTOKEN=83684228#
+#                           GET /popBibTex.cfm?id=503224&ids=SERIES364.503209.503222.503224&types=series.proceeding.section.article&reqtype=article&coll=Portal&dl=GUIDE&CFID=64957549&CFTOKEN=83684228 HTTP/1.1
+#						   
+#/popBibTex.cfm?id=503224&coll=Portal&dl=GUIDE&CFID=64957549&CFTOKEN=83684228						   
+#
+#http://portal.acm.org/citation.cfm?id=\1
+
+anchor_regex='^<[aA][ \f\t][^>]*onclick="window.open('"'"'\(popBibTex[^'"'"']*\)''.*'
+bibtex_url=$( wget -O - "$URL" | \
+		tr -s '\n\r' '\f' | \
+		sed 's/\(<[aA][ \f\t][^>]*>\)/\n\1/g' | \
+		grep -i "$anchor_regex" | \
+		sed "s#$anchor_regex#\1#I" | \
+		head -n1 )											
+
+wget -O - http://portal.acm.org/"$bibtex_url" | html2text

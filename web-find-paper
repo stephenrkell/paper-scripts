@@ -1,0 +1,13 @@
+#!/bin/bash
+
+if [ -z "$1" ]; then
+	echo "Need a PDF filename argument." 1>&2
+fi
+
+#pdftotext "$1" /dev/stdout | head | tr '\n' ' ' 
+#| sed 's/[a-zA-Z0-9]*[0-9:)(&\.\/]\+[a-zA-Z0-9]*//g' | sed 's/ \+/\t/g' 
+#| cut -f 1-10 | tr '\t' ' ' 
+
+
+pdf-firstwords "$1" | xargs sr -browser=firefox scholar
+

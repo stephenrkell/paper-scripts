@@ -1,0 +1,97 @@
+#!/bin/bash
+
+# Completely rewritten 2008-08-27.
+# Unprocessed papers are saved in ~/papers/Drop
+# A cron job runs this script.
+# The script will attempt to get BibTeX for the paper,
+# by calling bibtex-from-paper. Several things could happen:
+# - bibtex-from-paper yields BibTeX which it has high confidence in,
+# in which case the process is fully automatic: we put the paper
+# with Citeseer-style name (author00firstword.xxx) in Library and
+# the BibTeX likewise in Biblio.
+# - bibtex-from-paper yields BibTeX which it has reservations about,
+# in which case the user is pointed at the generated BibTeX and
+# asked to review it. We hope that even the worst BibTeX has the
+# correct author, title and year, so we can still move the paper
+# out of the Drop.
+# - bibtex-from-paper yields no BibTeX, in which case the paper
+# stays in the Drop directory and the user is asked to take care
+# of it manually.
+
+bibtex_get_first_named_author () {
+    echo -n "first named author: " 1>&2
+    #echo "$1" | tr -d '\n' | sed -r 's/.*author *= *\{ *([[:alpha:]]+ +)*([[:alpha:]]+ +)(( *and *)|\}).*/\2/'
+    echo "$1" | bib2xml 2>/dev/null | grep 'namePart type="family"' | head -n1 | sed -r 's#.*">(.*)</.*#\1#' | tr '[:upper:]' '[:lower:]' | tee /dev/stderr
+}
+
+bibtex_get_year () {
+    echo -n "year: " 1>&2
+    echo "$1" | bib2xml 2>/dev/null | grep 'dateIssued' | head -n1 | sed -r 's/.*>(.*)<.*/\1/' | tr '[:upper:]' '[:lower:]' | tee /dev/stderr
+}
+
+bibtex_get_title_first_word () {
+    echo -n "title first word: " 1>&2
+    echo "$1" | bib2xml 2>/dev/null | grep '<title>' | head -n1 | sed -r 's/.*>(.*)<.*/\1/' | \
+        tr '[:upper:]' '[:lower:]' | \
+        tr -s '[:blank:]' '\n' | \
+        egrep -v '^(the|on|a|in)$' | \
+        head -n1 | \
+        tee /dev/stderr
+}
+
+basename_from_bibtex () {
+    echo -n "basename: " 1>&2
+    echo $( bibtex_get_first_named_author "$1" )$( bibtex_get_year "$1" | tail -c3 )$( bibtex_get_title_first_word "$1" ) | tee /dev/stderr
+}
+
+citation_key_from_bibtex () {
+    echo -n "citation key: " 1>&2
+    echo $( bibtex_get_first_named_author "$1" )_$( bibtex_get_title_first_word "$1" )_$( bibtex_get_year "$1" ) | tee /dev/stderr
+}
+
+(find ~/papers/Drop -mindepth 1 -maxdepth 1 -type f ) | ( 
+	echo "$0 processed papers as follows:"
+	while read line; do
+
+		bibtex=$( bibtex-from-paper "$line" 2>/dev/null )
+        exitcode=$?
+        
+        if [[ $exitcode != 255 ]]; then
+            extension=$( echo "$line" | sed 's/.*\.//' )
+			basename=$( basename_from_bibtex "$bibtex" )
+			citation_key=$( citation_key_from_bibtex "$bibtex" )
+        else
+            extension=""
+            basename=""
+            citation_key=""
+        fi
+        # Sometimes bib2xml screws up, leaving us without one or more components
+        # of the citation key. Detect this, and proceed as if we failed to get bibtex.
+        if [[ $( expr match "$citation_key" ".\+_.\+_[0-9][0-9][0-9][0-9]" ) -eq 0 ]]; then
+            exitcode=255
+        fi
+
+		case $exitcode in
+			0)	# Good BibTeX
+				
+				echo "$bibtex" | sed -r "s/(@.*\{).*(,.*)/\1${citation_key}\2/" >> ~/papers/Biblio/${basename}.bib
+				mv "$line" ~/papers/Library/${basename}.${extension}
+				echo "$line was processed automatically, yielding basename ${basename}"
+			;;
+
+			255) # No BibTeX
+				echo "$line could not be processed"
+			;;
+
+			*) # Dodgy BibTeX
+				extension=$( echo "$line" | sed 's/.*\.//' )
+				basename=$( basename_from_bibtex "$bibtex" )
+				citation_key=$( citation_key_from_bibtex "$bibtex" )
+				echo "$bibtex" | sed -r "s/(@.*{).*(,.*)/\1${citation_key}\2/" >> ~/papers/Biblio/${basename}-lowq.bib
+				mv "$line" ~/papers/Library/${basename}.${extension}
+				echo "$line was processed, yielding basename ${basename}, but needs your attention."
+			;;
+		esac
+	done 
+	echo "END"
+)

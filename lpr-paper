@@ -46,7 +46,7 @@ require_command () {
 escape_regexp () {
     # filter which reads a string on input, and yields a plain grep-style regexp
     # which matches the string literally, by escaping the metacharacters
-    cat | sed -r 's/(\*|\.|\[|\^|\$|\[|\])/\\\1/g'
+    sed -r 's/(\*|\.|\[|\^|\$|\[|\])/\\\1/g'
 }
 
 make_match_any_line_regexp () {
@@ -55,7 +55,7 @@ make_match_any_line_regexp () {
     # blank lines. Ideally we would return a regexp which doesn't match anything,
     # but it turns out that there is no such grep regexp (I think!) and the
     # alternative suffices for our purposes (below)
-    cat | escape_regexp | sed 's/\(.*\)/^\\(\1\\)$/' | tr '\n' '\f' | \
+    escape_regexp | sed 's/\(.*\)/^\\(\1\\)$/' | tr '\n' '\f' | \
         sed 's/\f$/\n/' | sed 's/\f/\\|/g' |  sed 's/^$/\^\$/'
 }
 

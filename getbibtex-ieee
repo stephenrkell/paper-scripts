@@ -1,0 +1,24 @@
+#!/bin/bash
+
+# Downloads the bibtex from a citation page on computer.org
+
+URL="$1"
+which html2text >/dev/null || (echo "You must have a 'html2text' command available." 1>&2; false) || exit 1
+test -n "$URL" || (echo "You must specify the URL of a citation page." 1>&2; false) || exit 1
+
+anchor_regex='^<[aA][ \f\t][^>]*href="javascript:Popup=window.open.*Popup.document.write('"'"'\(.*\)'"'"');Popup.document.close();">BibTex</[aA]>'
+bibtex_src=$( wget -O - "$URL" | \
+		tr -s '\n\r' '\f' | \
+		sed 's/\(<[aA][ \f\t][^>]*>\)/\n\1/g' | \
+		grep -i "$anchor_regex" | \
+		sed "s#$anchor_regex#\1#I" | \
+		head -n1 )											
+
+#echo "bibtex_src is $bibtex_src" 1>&2
+
+echo "$bibtex_src" | html2text
+#\
+#sed 's#<br/\?>#\n#g'| \
+#sed 's/&[^&]*;/ /g' | \
+#sed 's/%[0-9a-fA-F]\{2\}//' | \
+#sed 's/<[^>]*>//g' | tr '\f' ' '

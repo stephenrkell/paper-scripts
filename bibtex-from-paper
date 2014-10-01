@@ -1,0 +1,160 @@
+#!/bin/bash
+
+# Attempts to scour the web for good-quality BibTeX for a particular paper.
+# Return value indicates the confidence in the BibTeX that was yielded:
+# 0 means high confidence of quality
+# 1 means less
+# 2 means less still (Citeseerx, Google Scholar et al)
+# 255 means no BibTeX was retrieved
+
+
+PAPER="$1"
+test -n "$PAPER" || (echo "You must specify a downloaded paper file to process." 1>&2; false) || exit 1
+test -f "$PAPER" || (echo "$1 is not a regular file!" 1>&2; false) || exit 1
+which paper-keywords >/dev/null || (echo "You must have a 'paper-keywords' command available!" 1>&2; false) || exit 1
+which surfraw >/dev/null || (echo "You must have a 'surfraw' command available!" 1>&2; false) || exit 1
+
+# NOTE: in this script, an `elvis' is not just a surfraw elvis name. Instead
+# it's a surfraw elvis name, then `-', then a domain name to search within.
+# At present, the elvis name should always be `scholar', since it's the only
+# one which does a good job of full-text search.
+
+pattern_lookup () {
+	case "$1" in
+		acmportal) echo "citation";;
+		scholar-*) echo "$1" | sed 's/.*-//' ;;
+		*) ;;
+	esac
+}
+
+elvis_extra_keywords() {
+	case "$1" in
+		scholar-*) echo -n "site:"; echo "$1" | sed 's/.*-//' ;;
+		*) ;;
+	esac
+}
+
+getbibtex_command () {
+	case "$1" in
+		scholar-portal.acm.org) echo "getbibtex-acmportal" ;;
+		scholar-computer.org) echo "getbibtex-ieee" ;;
+		scholar-springerlink.com) echo "getbibtex-springerlink" ;;
+		scholar-citeseerx.ist.psu.edu) echo "getbibtex-citeseerx" ;;
+		*) echo "getbibtex-$1" ;;
+	esac
+}
+
+bibtex_confidence () {
+	# The degree of confidence we have in each source of BibTeX
+	case "$1" in
+		*acmportal) echo "0" ;;
+		*ieee*) echo "0" ;;
+		*springerlink) echo "1" ;;
+		*citeseerx) echo "2" ;;
+		*scholar) echo "2" ;;
+		*) echo "255" ;;
+	esac
+}
+
+# reads stdin and outputs hrefs matching pattern $1 found in HTML <a> tags
+find_html_links_matching () {
+    anchor_regex='^<[aA].*[ \f\t]href="\([^"]*\)".*'
+    tr -s '\n\r' '\f' | \
+        sed 's/\(<[aA][ \f\t][^>]*>\)/\n\1/g' | \
+        grep -i "$anchor_regex" | \
+        sed "s#$anchor_regex#\1#I" | \
+        grep "$1"
+}
+
+# takes two URLs as arguments: a possibly not fully-qualified URL ($1),
+# and a fully-qualified URL that output it. Uses the fully qualified one
+# to fill in the prefix to the non-fully-qualified one. 
+fully_qualify_url () {
+	urlbase=$( echo "$2" | sed 's#/[^/]*$##' )
+	urlsite=$( echo "$urlbase" | sed -r 's#(http[s]?://[-a-zA-Z0-9\.]*(:[0-9]*)?).*#\1#' )
+	case "$1" in
+		http:*) echo "$1" ;;
+		/*) 	echo "${urlsite}$1" ;;
+		'') exit 1 ;;
+		*)		echo "${urlbase}/$1" ;;
+	esac
+}
+
+# fake browser that outputs raw HTML returned by URL $1, using enough
+# tricks to bypass most robot lock-outs.
+http_referer=""
+blah_browse () {
+    # TODO: add cookie-file support here
+	wget --referer="$http_referer" --user-agent="BlahBrowse 1.0" -O - "$1"
+	http_referer="$1"	
+}
+
+search_keywords=$( paper-keywords "$PAPER" )
+test -n "$search_keywords" || (echo "Sorry, paper-keywords failed to extract any keywords from this paper." 1>&2; false) || exit 1
+echo "keywords are $search_keywords" 1>&2
+
+elvi="scholar-portal.acm.org scholar-computer.org scholar-springerlink.com scholar-citeseerx.ist.psu.edu"
+test -n "$elvi" || (echo "No recognised elvi found in your surfraw elvi!" 1>&2; false) || exit 1
+echo "known elvi are $elvi" 1>&2
+
+# to begin, we have no BibTeX and no confidence
+best_bibtex=""
+best_confidence=255
+
+for elvis in $elvi; do
+	# elvis_base is *always* (Google) scholar right now; elvis_ext is the domain searched using it
+	elvis_base=$( echo $elvis | sed 's/-.*//' )
+	elvis_ext=$( echo $elvis | sed 's/.*-//' )
+	
+	# the pattern which we will eventually be looking for in links
+	link_pattern=$( pattern_lookup "$elvis" )
+	echo "link_pattern is $link_pattern" 1>&2
+	
+	# see whether we have a getbibtex command for this elvis
+	getbibtex=`which $(getbibtex_command $elvis)`
+	test -x $getbibtex || continue
+	
+	# First we use scholar to find *all* clusters (as in "see all nn")
+	# that match our keywords, if any. Then we will search within that cluster
+	# for one that matches our elvis_ext. There may be no clusters, only a
+    # singleton result, in which case we use that if we can.
+	
+	# find cluster
+	scholar_url=$( surfraw -print scholar $search_keywords )
+	echo "scholar_url is $scholar_url" 1>&2
+	
+	# browse to results, and extract clusters
+	scholar_cluster_list=$( blah_browse "$scholar_url" | find_html_links_matching cluster )
+	echo "scholar_cluster_list is $scholar_cluster_list" 1>&2
+
+    if test -n "$scholar_cluster_list"; then
+        # if we found a cluster, then get links from it
+        candidate_links=$( while read cluster_link; do
+		    test -z "$cluster_link" && continue
+		    # search within this cluster 
+		    cluster_link=$( fully_qualify_url "$cluster_link" "$scholar_url" )
+		    cluster_filtered_links=$( http_referer="$scholar_url" blah_browse  "$cluster_link"| find_html_links_matching $link_pattern )
+		    echo "cluster_filtered_links is $cluster_filtered_links" 1>&2
+		    echo "$cluster_filtered_links"		
+	    done <<<"$scholar_cluster_list" )
+    else
+        # else just use the singleton link on the scholar results page, if it matches the pattern
+        candidate_links=$( blah_browse "$scholar_url" | find_html_links_matching $link_pattern )
+    fi
+	
+    # run getbibtex on each result; if it succeeds, we're done with this elvis
+	# -- we echo the confidence to stdout, along with a single-line-mangled BibTeX
+	while read citation_link; do
+		test -z "$citation_link" && continue
+		$getbibtex "$citation_link" | tr '\n' '\f' && echo -e '\t' $( bibtex_confidence $getbibtex ) && break 2
+	done <<<"$candidate_links"
+done | ( while read line; do
+	# lines are of the form
+	# <bibtex with \f for \n>\t<confidence>
+	bibtex=$( echo "$line" | sed 's/\t.*//' | tr '\f' '\n' )
+	confidence=$( echo "$line" | sed 's/.*\t//' )
+	if [[ $confidence -lt $best_confidence ]]; then
+		best_bibtex="$bibtex"
+		best_confidence="$confidence"
+	fi
+done; echo "$best_bibtex"; exit "$best_confidence" )

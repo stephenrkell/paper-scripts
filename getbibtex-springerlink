@@ -1,0 +1,26 @@
+#!/bin/bash
+
+# Downloads the bibtex from a citation page on springerlink
+
+URL="$1"
+which xml2bib >/dev/null || (echo "No 'xml2bib' found. You must have bibutils available." 1>&2; false) || exit 1
+which ris2xml >/dev/null || (echo "No 'ris2xml' found. You must have bibutils available." 1>&2; false) || exit 1
+test -n "$URL" || (echo "You must specify the URL of a citation page." 1>&2; false) || exit 1
+
+# href='/export.mpx?code=x015v36vpw562738&mode=ris'>RIS</a>
+
+anchor_regex='^<[aA][ \f\t][^>]*href='"'"'/\(export.mpx?.*&mode=ris\)'"'"'>RIS</a>.*'
+cookie_file=$(mktemp)
+echo "cookie file is $cookie_file" 1>&2
+ris_url=$( wget --keep-session-cookies --save-cookies $cookie_file -O - "$URL" | \
+		tr -s '\n\r' '\f' | \
+		sed 's/\(<[aA][ \f\t][^>]*>\)/\n\1/g' | \
+		grep -i "$anchor_regex" | \
+		sed "s#$anchor_regex#http://www.springerlink.com/\1#I" | \
+		head -n1 )											
+
+#echo "bibtex_src is $bibtex_src" 1>&2
+echo "ris_url is $ris_url" 1>&2
+
+wget --load-cookies $cookie_file -O - "$ris_url" | ris2xml | xml2bib
+unlink $cookie_file

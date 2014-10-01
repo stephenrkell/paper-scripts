@@ -1,0 +1,17 @@
+#!/bin/bash
+
+ELVIS="$1"
+PATTERN="$2"
+test -n "$( sr -elvi | grep $ELVIS )" || (echo "$ELVIS does not appear to be a valid elvis" 1>&2; false) || exit 1
+test -n "$PATTERN" || (echo "You must specify a pattern matched by URIs of interest" 1>&2; false) || exit 1
+shift 2
+test -n "$@" || (echo "You must specify some search terms!" 1>&2; false) || exit 1
+
+URL_EXPR='.*href="\([^"]*\)".*'
+
+wget -O - $( sr -print "$ELVIS" $@ ) | \
+	tr '\n' ' ' | \
+	sed 's/\(\<[aA] \)/\n\1 /g' | \
+	grep "$PATTERN" | \
+	head -n1 | \
+	sed "s#$URL_EXPR#\1#I"

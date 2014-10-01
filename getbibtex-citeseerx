@@ -1,0 +1,20 @@
+#!/bin/bash
+
+# Downloads the bibtex from a citation page on citeseerx
+
+URL="$1"
+which html2text >/dev/null || (echo "You must have a 'html2text' command available." 1>&2; false) || exit 1
+test -n "$URL" || (echo "You must specify the URL of a citation page." 1>&2; false) || exit 1
+
+#div_regex='<div class="content_box">[^>]*<h2>BibTeX | <span[^>]*>Add To MetaCart</span> <span[^>]*></span></h2>(([^<]*)\|(<br/>))*</div>'
+
+div_regex='<div class="content_box">[^>]*<h2>BibTeX | <span[^>]*>Add To MetaCart</span> <span[^>]*></span></h2>\(\(\([^>]*\)\|\(<br/>\)\)*\)</div>.*'
+
+bibtex_html=$( wget -O - "$URL" | \
+		tr -s '\n\r' '\f' | \
+		sed 's/\(<[dD][iI][vV][ \f\t][^>]*>\)/\n\1/g' | \
+		grep -i "$div_regex" | \
+		sed "s#$div_regex#\1#I" | \
+		head -n1 )											
+
+echo "$bibtex_html" | html2text

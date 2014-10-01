@@ -1,0 +1,137 @@
+#!/bin/bash
+
+# This script reads a paper in some format (e.g. PDF)
+# and attempts to produce a good set of keywords
+# for searching for that paper in an online citation index
+# or bibliography server, e.g. Google Scholar, ACM Portal, etc..
+
+test -n "$1" || ( echo "You must specify a paper file to process." 1>&2; false) || exit 1
+test -f "$1" || ( echo "$1 is not a file, or not a regular file." 1>&2; false) || exit 1
+test -x `which aspell` || (echo "You must have an available aspell command." 1>&2; false) || exit 1
+
+first_sane_words () {
+
+# This just gives you the first ten words that
+# don't have any weird characters or numbers in them.
+
+	head -n10 | \
+		tr '\n' ' ' | \
+		sed 's/[a-zA-Z0-9]*[0-9:)(&\.\/]\+[a-zA-Z0-9]*//g' | \
+		sed 's/ \+/\t/g' | \
+		cut -f 1-20 | \
+		tr '\t' ' '
+}
+
+complete_sentence () {
+
+# This outputs the first complete sentence in the text
+# containing at least 30 sane characters
+
+	sentence_lines | \
+		pass_line_if_candidate_sentence | \
+		rewrite_sentence_as_keyword
+}
+
+sentence_lines () {
+	tr -c '[:print:]' ' ' | \
+		sed 's/\([^A-Z]\.\)/\1\n/g'	
+}
+
+#candidate_sentence_expression="^[ \t]*((([A-Z][a-z])|(A ))([A-Za-z]|[-' ]){75,150}\.)"
+# The following nightmarish regex is intended to match
+# "straightforward" English sentences. It deliberately
+# avoids matching things which look like artifacts of pdftotext,
+# for example one-letter words apart from 'a'.
+candidate_sentence_expression="^[ \t]*((([A-Z][a-z])|(A )) *(([Aa] +)|[-A-Za-z0-9'\(\)]{2,} +){12,}([-A-Za-z0-9']{2,})\.)"
+
+pass_line_if_candidate_sentence () {	
+	egrep "$candidate_sentence_expression"
+}
+
+rewrite_sentence_as_keyword () {
+	sed -r "s#$candidate_sentence_expression#"'"\1"#'
+}
+
+sentence_lines_passing_spellcheck () {
+	sentence_lines "$1" | \
+		pass_line_if_spellchecks
+}
+
+pass_line_if_spellchecks () {
+	while read line; do
+		misspelled=$( echo "$line" | aspell list | tr '\n' ' ' )
+		#echo "misspelled words: $misspelled" 1>&2
+		test -z "$misspelled" && echo "$line"
+	done
+}
+
+complete_spellchecked_sentence () {
+
+# This outputs the first complete sentence in the text
+# containing at least 30 sane characters, and that
+# passes the spellchecker
+
+	expression="^[ \t]*(([[:alpha:]]|[-' ]){30,120}\.)"
+	sentence_lines | \
+		pass_line_if_candidate_sentence | \
+		pass_line_if_spellchecks | \
+		head -n1 | \
+		rewrite_sentence_as_keyword
+}
+
+email_addresses () {
+	email_expression='[^-_a-zA-Z\.0-9]*\([-_a-zA-Z\.0-9]\+@[-_a-zA-Z\.0-9]\+\).*'
+	grep "$email_expression" | \
+		sed "s/${email_expression}/\1/"
+}
+
+words_as_lines() {
+	tr -c '[:graph:]' '\n' | tr -s '\n'
+}
+
+alternation_by_line () {
+	sed 's/\(.*\)/\1\nOR/' | head --lines=-1
+}
+
+PAPER="$1"
+
+get_paper_text () {
+	MIMETYPE=$( file -bi "$1" )
+	case "$MIMETYPE" in
+		application/pdf) # skip page 1, because it may be boilerplate
+			pdftotext -f 2 "$PAPER" /dev/stdout | tr -s '\n'
+			;;
+		application/postscript)
+			which ps2pdf >/dev/null || (echo "Postscript file found but no ps2pdf." 1>&2; false) ||	exit 1
+			tmpfile=$(mktemp)
+			ps2pdf "$PAPER" "$tmpfile"
+			pdftotext -f 2 "$tmpfile" /dev/stdout
+			rm -f "$tmpfile"
+			;;			
+		*)	echo "Sorry, mimetype $MIMETYPE is not yet supported!" 1>&2; exit 1
+			;;
+	esac
+}
+
+text=$( get_paper_text "$1" | tr -cs '[:print:]' '\n' )
+test -n "$text" || (echo "Could not extract any text from ${PAPER}!" 1>&2; false) || exit 1
+
+first_words=$( echo -n "$text" | first_sane_words )
+first_sane_nonspellchecking_words=$( echo -n "$first_words" | aspell list | tr '\n' ' ' )
+email_addresses=$( echo -n "$text" | email_addresses )
+sentence=$( echo -n "$text" | complete_spellchecked_sentence )
+
+#echo first: "$first_words"
+#echo sane-nonsc: "$first_sane_nonspellchecking_words"
+#echo email: "$email_addresses" 1>&2
+#echo sent: "$sentence"
+
+if test -n "$sentence"; then
+	#echo -n $( echo "$first_sane_nonspellchecking_words" | words_as_lines | alternation_by_line | tr '\n' ' ' )
+	#echo -n ' '
+	echo "$sentence" | rewrite_sentence_as_keyword
+elif test -n "$first_words"; then
+	echo "$email_addresses" "$first_words" | tr '\n' ' '; echo
+else
+	echo "Failed to extract keywords!" 1>&2; false
+fi
