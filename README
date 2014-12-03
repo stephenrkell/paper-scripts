@@ -1,0 +1,11 @@
+lpr-paper generally behaves like lpr. It tries to be self-documenting to the 
+extent that lpr is.
+
+The other scripts are undocumented for now.
+
+lpr-paper incorporates some code from pdfjam by David Firth.
+<http://www2.warwick.ac.uk/fac/sci/statistics/staff/academic-research/firth/software/pdfjam/>
+which is released under the GNU GPL version 2 (see COPYING.lpr-paper).
+
+The other scripts are released under the MIT license (see COPYING.others).
+
