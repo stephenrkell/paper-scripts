@@ -1,0 +1,31 @@
+#!/bin/bash
+
+# Downloads the bibtex from a citation page on dl.acm.org
+
+URL="$1"
+which html2text >/dev/null || (echo "You must have a 'html2text' command available." 1>&2; false) || exit 1
+test -n "$URL" || (echo "You must specify the URL of a citation page." 1>&2; false) || exit 1
+
+anchor_regex='^<[aA][ \f\t][^>]*\(exportformats.cfm.*format=bibtex\).*'
+bibtex_url=$( wget --user-agent="BlahBrowse 1.0" -O - "$URL" | \
+		tr -s '\n\r' '\f' | \
+		sed 's/\(<[aA][ \f\t][^>]*>\)/\n\1/g' | \
+		grep -i "$anchor_regex" | \
+		sed "s#$anchor_regex#\1#I" | \
+		head -n1 )											
+
+if [ -n "$bibtex_url" ]; then
+    echo "scraped bibtex_url $bibtex_url" 1>&2
+    exports_page="$( wget --user-agent="BlahBrowse 1.0" -O - http://dl.acm.org/"$bibtex_url" )"
+    # instead of using html2text, we scrape the "pre" sections.
+    # Then we *should* html2text them, because they might/should contain HTML escapes,
+    # but I haven't see any, and it ruins the line breaking, so don't do that for now.
+    echo "$exports_page" | awk '
+        BEGIN { inpre=0; }
+        /<(PRE|pre).*/ { inpre=1; next; }
+        /<\/(PRE|pre).*/ { inpre=0; }
+        { if (inpre) print $0; }' #| html2text
+    
+else
+    echo "Error: could not scrape bibtex URL from $URL" 1>&2; false
+fi

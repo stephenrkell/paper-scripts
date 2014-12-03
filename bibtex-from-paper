@@ -21,7 +21,7 @@ which surfraw >/dev/null || (echo "You must have a 'surfraw' command available!"
 
 pattern_lookup () {
     case "$1" in
-        acmportal) echo "citation";;
+        acmdl) echo "citation";;
         scholar-*) echo "$1" | sed 's/.*-//' ;;
         *) ;;
     esac
@@ -36,7 +36,7 @@ elvis_extra_keywords() {
 
 getbibtex_command () {
     case "$1" in
-        scholar-portal.acm.org) echo "getbibtex-acmportal" ;;
+        scholar-dl.acm.org) echo "getbibtex-acmdl" ;;
         scholar-computer.org) echo "getbibtex-ieee" ;;
         scholar-springerlink.com) echo "getbibtex-springerlink" ;;
         scholar-citeseerx.ist.psu.edu) echo "getbibtex-citeseerx" ;;
@@ -47,7 +47,7 @@ getbibtex_command () {
 bibtex_confidence () {
     # The degree of confidence we have in each source of BibTeX
     case "$1" in
-        *acmportal) echo "0" ;;
+        *acmdl) echo "0" ;;
         *ieee*) echo "0" ;;
         *springerlink) echo "1" ;;
         *citeseerx) echo "2" ;;
@@ -93,7 +93,7 @@ search_keywords=$( paper-keywords "$PAPER" | head -n1 )
 test -n "$search_keywords" || (echo "Sorry, paper-keywords failed to extract any keywords from this paper." 1>&2; false) || exit 1
 echo "keywords are $search_keywords" 1>&2
 
-elvi="scholar-portal.acm.org scholar-computer.org scholar-springerlink.com scholar-citeseerx.ist.psu.edu"
+elvi="scholar-dl.acm.org scholar-computer.org scholar-springerlink.com scholar-citeseerx.ist.psu.edu"
 test -n "$elvi" || (echo "No recognised elvi found in your surfraw elvi!" 1>&2; false) || exit 1
 echo "known elvi are $elvi" 1>&2
 
@@ -102,6 +102,10 @@ best_bibtex=""
 best_confidence=255
 
 for elvis in $elvi; do
+    echo '*************************************************************' 1>&2
+    echo "Trying bibtex elvis $elvis"                                    1>&2
+    echo '*************************************************************' 1>&2
+
     # elvis_base is *always* (Google) scholar right now; elvis_ext is the domain searched using it
     elvis_base=$( echo $elvis | sed 's/-.*//' )
     elvis_ext=$( echo $elvis | sed 's/.*-//' )
@@ -133,6 +137,7 @@ for elvis in $elvi; do
             test -z "$cluster_link" && continue
             # search within this cluster 
             cluster_link=$( fully_qualify_url "$cluster_link" "$scholar_url" )
+            echo "trying cluster link $cluster_link with link pattern $link_pattern" 1>&2
             cluster_filtered_links=$( http_referer="$scholar_url" blah_browse  "$cluster_link"| find_html_links_matching $link_pattern )
             echo "cluster_filtered_links is $cluster_filtered_links" 1>&2
             echo "$cluster_filtered_links"        
@@ -148,6 +153,9 @@ for elvis in $elvi; do
         test -z "$citation_link" && continue
         $getbibtex "$citation_link" | tr '\n' '\f' && echo -e '\t' $( bibtex_confidence $getbibtex ) && break 2
     done <<<"$candidate_links"
+    echo '*************************************************************' 1>&2
+    echo "Finished with bibtex elvis $elvis"                             1>&2
+    echo '*************************************************************' 1>&2
 done | ( while read line; do
     # lines are of the form
     # <bibtex with \f for \n>\t<confidence>
