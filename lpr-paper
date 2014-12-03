@@ -106,10 +106,16 @@ while read line; do
 done <<<"$lines"
 
 if test -z "${fnames[*]}"; then
-    tmpfile=$(mktemp)
-    cat > "$tmpfile"
-    fnames[0]="$tmpfile"
-    ctr=1
+    if ! tty >/dev/null; then
+        tmpfile=$(mktemp)
+        cat > "$tmpfile"
+        fnames[0]="$tmpfile"
+        ctr=1
+    else
+        echo "$(basename "$0"): no files to print." 1>&2
+        # Call the lpr wrapper 
+        exec $LPR_WRAPPER "$@"
+    fi
 fi
 
 prompt_user () {
